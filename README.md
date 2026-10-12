@@ -113,6 +113,9 @@ Atom loads `~/.config/atom/ATOM.md`, then every `ATOM.md`, `.atom/ATOM.md` and `
 
 ### Settings, hooks, and MCP
 
+> **Workspace trust.** Project settings that can run code (hooks, MCP servers, allow rules, plugins, permission mode in
+> `.atom/`) are ignored until you run `atom trust` in that folder. Your own `~/.config/atom/settings.json` always applies.
+
 User settings live in `~/.config/atom/settings.json`, project settings in `.atom/settings.json`:
 
 ```json

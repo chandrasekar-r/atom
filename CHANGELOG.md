@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.5.1 (security)
+- Workspace trust: hooks, MCP servers, allow rules, plugins and permission mode from a project's `.atom/` only apply after
+  `atom trust` (or `ATOM_TRUST_PROJECT=1`). Opening a cloned repository can no longer run its commands.
+- `bypass` permission mode can only be enabled from the command line, never from a settings file.
+- `bash:prefix *` allow rules no longer match commands containing shell control characters (`;`, `&&`, `|`, `$()`, backticks, redirects, newlines).
+- Read-only tools ask before reading outside the project directory; `web_search` asks when the query contains a long token-like string.
+- Atom Cloud: session cookie is encrypted (AES-GCM), constant-time secret comparisons, SSRF guard on the agent's `web_fetch`, security headers.
+- Gateway: constant-time key comparison; `/health` reports whether the key is long enough; `atom login --gateway` warns on short keys and requires https.
+
 ## v0.5.0
 - One backend for the terminal and the web: Atom Cloud sessions can be started, continued, diffed and turned into PRs from
   the CLI, the Atom Cloud web UI, or a web assistant that proxies the same API (for example a harness "Code" tab).

@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
-import { CONFIG_DIR } from "./config.js";
+import { CONFIG_DIR, isTrusted } from "./config.js";
 import { Tool } from "./tools.js";
 
 /** Plugins: JS/TS-compiled ES modules (local files/dirs or npm packages) that extend Atom.
@@ -20,7 +20,7 @@ export class PluginHost {
   }
   sources(settings: any): string[] {
     const s: string[] = [...(settings.plugins || [])];
-    for (const d of [path.join(CONFIG_DIR, "plugins"), path.join(this.cwd, ".atom", "plugins")]) {
+    for (const d of [path.join(CONFIG_DIR, "plugins"), ...(isTrusted(this.cwd) ? [path.join(this.cwd, ".atom", "plugins")] : [])]) {
       let ents: string[] = []; try { ents = fs.readdirSync(d); } catch { continue; }
       for (const e of ents) if (e !== "node_modules" && e !== "package.json" && e !== "package-lock.json" && !e.startsWith(".")) s.push(path.join(d, e));
     }
@@ -31,7 +31,7 @@ export class PluginHost {
     let dir = local && fs.existsSync(local) && fs.statSync(local).isDirectory() ? local : undefined;
     if (local && !dir) return { entry: local };
     if (!dir) { // npm package: project node_modules, then ~/.config/atom/plugins/node_modules
-      for (const base of [path.join(this.cwd, "package.json"), path.join(CONFIG_DIR, "plugins", "package.json")]) {
+      for (const base of [...(isTrusted(this.cwd) ? [path.join(this.cwd, "package.json")] : []), path.join(CONFIG_DIR, "plugins", "package.json")]) {
         try { dir = path.dirname(createRequire(base).resolve(src + "/package.json")); break; } catch {}
       }
       if (!dir) return {};

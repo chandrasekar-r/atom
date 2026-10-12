@@ -1,12 +1,18 @@
 // Atom gateway: a tiny Worker that exposes your account's Workers AI binding
 // as an OpenAI-compatible endpoint (plus raw model runs and optional D1 memory sync),
 // protected by a shared key.
+const te = new TextEncoder();
+async function safeEqual(a, b) { // constant-time comparison via HMAC digests
+  const k = await crypto.subtle.generateKey({ name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const [x, y] = await Promise.all([crypto.subtle.sign("HMAC", k, te.encode(a)), crypto.subtle.sign("HMAC", k, te.encode(b))]);
+  return crypto.subtle.timingSafeEqual ? crypto.subtle.timingSafeEqual(x, y) : new Uint8Array(x).every((v, i) => v === new Uint8Array(y)[i]);
+}
 export default {
   async fetch(req, env) {
     const url = new URL(req.url);
-    if (url.pathname === "/health") return Response.json({ ok: true, memory: !!env.DB });
+    if (url.pathname === "/health") return Response.json({ ok: true, memory: !!env.DB, key_ok: (env.ATOM_KEY || "").length >= 32 });
     const auth = req.headers.get("authorization") || "";
-    if (!env.ATOM_KEY || auth !== `Bearer ${env.ATOM_KEY}`) return new Response("unauthorized", { status: 401 });
+    if (!env.ATOM_KEY || !(await safeEqual(auth, `Bearer ${env.ATOM_KEY}`))) return new Response("unauthorized", { status: 401 });
     try {
       if (req.method === "POST" && url.pathname === "/v1/chat/completions") {
         const { model, ...input } = await req.json();

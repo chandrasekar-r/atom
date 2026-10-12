@@ -124,5 +124,7 @@ export function refreshIfNeeded(c: Credentials): Credentials {
 }
 
 export async function loginGateway(url: string, key: string): Promise<Credentials> {
+  if (key.length < 32) console.error("warning: gateway key is short; use a random key of 32+ characters (e.g. openssl rand -hex 32)");
+  if (!/^https:\/\//.test(url) && !/^http:\/\/(localhost|127\.0\.0\.1)/.test(url)) throw new Error("gateway URL must use https");
   const c: Credentials = { kind: "gateway", url, key }; console.log(await verify(c)); saveCredentials(c); return c;
 }

@@ -30,17 +30,39 @@ async function authed(req, env) {
   if (bearer) { const login = await githubLogin(bearer); return login && login.toLowerCase() === allowed ? { login, token: bearer } : null; }
   const cookie = /(?:^|;\s*)atom_session=([^;]+)/.exec(req.headers.get("cookie") || "")?.[1];
   if (!cookie) return null;
-  const [payload, sig] = decodeURIComponent(cookie).split("."); if (!payload || sig !== await hmac(env.COOKIE_SECRET, payload)) return null;
-  const s = JSON.parse(atob(payload)); if (s.exp < Date.now() || s.login.toLowerCase() !== allowed) return null;
+  const s = await openBox(env, decodeURIComponent(cookie)); if (!s || s.exp < Date.now() || String(s.login).toLowerCase() !== allowed) return null;
   return { login: s.login, token: s.token };
 }
+// The session cookie carries the GitHub token, so it is encrypted (AES-GCM, key derived from COOKIE_SECRET), not just signed.
+async function boxKey(env) { return crypto.subtle.importKey("raw", await crypto.subtle.digest("SHA-256", enc.encode("atom-cookie:" + env.COOKIE_SECRET)), "AES-GCM", false, ["encrypt", "decrypt"]); }
+const b64u = (b) => btoa(String.fromCharCode(...new Uint8Array(b))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const unb64u = (s) => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
+async function sealBox(env, obj) { const iv = crypto.getRandomValues(new Uint8Array(12)); const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, await boxKey(env), enc.encode(JSON.stringify(obj))); return "v2." + b64u(iv) + "." + b64u(ct); }
+async function openBox(env, v) {
+  try { const [ver, iv, ct] = v.split("."); if (ver !== "v2") return null; return JSON.parse(new TextDecoder().decode(await crypto.subtle.decrypt({ name: "AES-GCM", iv: unb64u(iv) }, await boxKey(env), unb64u(ct)))); } catch { return null; }
+}
 async function makeCookie(env, login, token) {
-  const payload = btoa(JSON.stringify({ login, token, exp: Date.now() + 7 * 86400_000 }));
-  return `atom_session=${encodeURIComponent(payload + "." + await hmac(env.COOKIE_SECRET, payload))}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=604800`;
+  return `atom_session=${encodeURIComponent(await sealBox(env, { login, token, exp: Date.now() + 7 * 86400_000 }))}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=604800`;
+}
+async function safeEqual(a, b) { const k = await crypto.subtle.generateKey({ name: "HMAC", hash: "SHA-256" }, false, ["sign"]); const [x, y] = await Promise.all([crypto.subtle.sign("HMAC", k, enc.encode(a)), crypto.subtle.sign("HMAC", k, enc.encode(b))]); return crypto.subtle.timingSafeEqual(x, y); }
+const SEC_HEADERS = { "x-content-type-options": "nosniff", "referrer-policy": "no-referrer", "strict-transport-security": "max-age=31536000; includeSubDomains", "x-frame-options": "DENY", "permissions-policy": "camera=(), microphone=(), geolocation=()" };
+// SSRF guard for the agent's web_fetch: public http(s) only, no private/loopback/metadata addresses or the owner's own zone.
+function checkFetchUrl(raw) {
+  let u; try { u = new URL(raw); } catch { throw new Error("invalid URL"); }
+  if (!/^https?:$/.test(u.protocol)) throw new Error("only http(s) URLs");
+  const h = u.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (/(^|\.)(localhost|local|internal|lan|home|corp|arpa)$/.test(h) || /(^|\.)rclabs\.in$/.test(h)) throw new Error("host not allowed");
+  if (/^(10\.|127\.|0\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/.test(h) || /^(::1?|f[cd]|fe80)/.test(h)) throw new Error("private address not allowed");
+  return u;
 }
 
 export default {
-  async fetch(req, env) {
+  async fetch(req, env, ctx) {
+    const res = await this.handle(req, env, ctx);
+    if (res.status === 101 || res.webSocket) return res;
+    const out = new Response(res.body, res); for (const [k, v] of Object.entries(SEC_HEADERS)) if (!out.headers.has(k)) out.headers.set(k, v); return out;
+  },
+  async handle(req, env) {
     const url = new URL(req.url); const p = url.pathname;
     if (p === "/health") return json({ ok: true, service: "atom-cloud", deviceFlow: true, webFlow: !!env.GITHUB_CLIENT_SECRET, user: env.ALLOWED_GITHUB_LOGIN || null });
     if (p === "/" || p === "/ui") return new Response(UI, { headers: { "content-type": "text/html; charset=utf-8" } });
@@ -69,7 +91,7 @@ export default {
       const ck = /(?:^|;\s*)atom_state=([^;]+)/.exec(req.headers.get("cookie") || "")?.[1] || ""; const [st, sig] = ck.split(".");
       const state = url.searchParams.get("state"), code = url.searchParams.get("code");
       const page = (msg, s = 403) => new Response(`<!doctype html><meta charset=utf-8><p>${msg.replace(/</g, "&lt;")}</p><p><a href="/">Back</a></p>`, { status: s, headers: { "content-type": "text/html; charset=utf-8", "set-cookie": "atom_state=; Path=/auth; Max-Age=0" } });
-      if (!state || !code || state !== st || sig !== await hmac(env.COOKIE_SECRET, "state:" + st)) return page("Sign-in failed: invalid or expired state. Try again.", 400);
+      if (!state || !code || state !== st || !sig || !(await safeEqual(sig, await hmac(env.COOKIE_SECRET, "state:" + st)))) return page("Sign-in failed: invalid or expired state. Try again.", 400);
       const r = await (await fetch("https://github.com/login/oauth/access_token", { method: "POST", headers: { accept: "application/json", "content-type": "application/json" }, body: JSON.stringify({ client_id: clientId(env), client_secret: env.GITHUB_CLIENT_SECRET, code, redirect_uri: url.origin + "/auth/github/callback" }) })).json();
       if (!r.access_token) return page("GitHub sign-in failed: " + (r.error_description || r.error || "no token"), 400);
       if (st.startsWith("w-") && env.WEB_RETURN_URL) {
@@ -87,7 +109,7 @@ export default {
       return new Response(null, { status: 302, headers: h });
     }
     if (p === "/auth/ticket" && req.method === "POST") {
-      if (!env.INTERNAL_KEY || req.headers.get("x-internal-key") !== env.INTERNAL_KEY) return json({ error: "forbidden" }, 403);
+      if (!env.INTERNAL_KEY || !(await safeEqual(req.headers.get("x-internal-key") || "", env.INTERNAL_KEY))) return json({ error: "forbidden" }, 403);
       const { ticket } = await req.json();
       return env.SESSIONS.get(env.SESSIONS.idFromName("__index__")).fetch("https://do/index/ticket-take", { method: "POST", body: JSON.stringify({ ticket }) });
     }
@@ -291,7 +313,7 @@ export class AtomSession {
         const pr = await gh(await this.get("token"), `/repos/${meta.repo.owner}/${meta.repo.name}/pulls`, { method: "POST", body: JSON.stringify({ title: a.title, body: a.body || "Opened by Atom Cloud.", head: meta.pushed.branch, base: a.base || meta.repo.base || meta.repo.defaultBranch || "main" }) });
         meta.pr = pr.html_url; await this.put("meta", meta); await this.event("pr", { url: pr.html_url }); return `Opened ${pr.html_url}`;
       }
-      case "web_fetch": { const r = await fetch(a.url, { headers: { "user-agent": "atom-cloud" } }); return (await r.text()).replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").slice(0, 20000); }
+      case "web_fetch": { let u = checkFetchUrl(a.url), r; for (let i = 0; ; i++) { r = await fetch(u, { headers: { "user-agent": "atom-cloud" }, redirect: "manual" }); const loc = r.headers.get("location"); if (r.status >= 300 && r.status < 400 && loc && i < 5) { u = checkFetchUrl(new URL(loc, u).toString()); continue; } break; } return (await r.text()).replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").slice(0, 20000); }
     }
     return `Error: unknown tool ${name}`;
   }

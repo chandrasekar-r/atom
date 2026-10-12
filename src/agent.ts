@@ -1,3 +1,5 @@
+import path from "node:path";
+import fs from "node:fs";
 import os from "node:os";
 import { Credentials, Settings, saveProjectAllow } from "./config.js";
 import { chat, Msg } from "./provider.js";
@@ -94,11 +96,12 @@ export class Agent {
   allowed(tool: Tool, args: any): boolean {
     const rules = this.settings.allow || [];
     if (rules.includes(tool.name)) return true;
-    if (tool.name === "bash") return rules.some((r) => r.startsWith("bash:") && (args.command === r.slice(5) || (r.endsWith("*") && args.command.startsWith(r.slice(5, -1)))));
+    if (tool.name === "bash") return bashRuleAllows(rules, String(args.command ?? ""));
     return false;
   }
   async permit(tool: Tool, args: any): Promise<boolean> {
-    if ((tool.readOnly && tool.name !== "web_fetch") || tool.name === "task") return true;
+    if (tool.name === "task") return true;
+    if (tool.readOnly && tool.name !== "web_fetch" && !needsReadApproval(tool, args, this.cwd)) return true;
     if (this.mode === "bypass" || this.allowed(tool, args)) return true;
     if (this.mode === "auto" && (tool.name === "write_file" || tool.name === "edit_file")) return true;
     const d = await this.ui.ask(tool, tool.preview ? tool.preview(args, this.ctx()) : JSON.stringify(args));
@@ -210,4 +213,30 @@ export class Agent {
     s.turn = turn - 1; s.snapshots = this.checkpoints.snaps;
     return files;
   }
+}
+
+// ---------- permission helpers (exported for tests) ----------
+const SHELL_META = /[;&|`$<>(){}\n\r\\]|\*\*/;
+/** `bash:cmd` matches exactly; `bash:prefix *` matches the prefix only when the rest has no shell control characters,
+ *  so an approved `npm *` cannot be chained into `npm test; curl … | sh`. */
+export function bashRuleAllows(rules: string[], cmd: string): boolean {
+  return rules.some((r) => {
+    if (!r.startsWith("bash:")) return false;
+    const body = r.slice(5);
+    if (cmd === body) return true;
+    if (!body.endsWith("*")) return false;
+    const prefix = body.slice(0, -1);
+    return cmd.startsWith(prefix) && !SHELL_META.test(cmd);
+  });
+}
+const SECRETISH = /[A-Za-z0-9_\-]{32,}/;
+/** Read-only tools still ask when they reach outside the project (e.g. ~/.ssh, credential files),
+ *  and web_search asks when the query carries a long token-like string (possible exfiltration). */
+export function needsReadApproval(tool: { name: string }, args: any, cwd: string): boolean {
+  if (tool.name === "web_search") return SECRETISH.test(String(args?.query ?? ""));
+  const p = args?.path; if (typeof p !== "string" || !p) return false;
+  const full = path.resolve(cwd, p.replace(/^~(?=$|\/)/, os.homedir()));
+  let real = full; try { real = fs.realpathSync(full); } catch {}
+  let root = cwd; try { root = fs.realpathSync(cwd); } catch {}
+  return !(real === root || real.startsWith(root + path.sep));
 }

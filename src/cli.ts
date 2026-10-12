@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
-import { matchModel, saveUserModel } from "./config.js";
+import { matchModel, saveUserModel, isTrusted, trustDir, projectNeedsTrust } from "./config.js";
 import { CONFIG_DIR, DEFAULT_MODEL, MODELS, clearCredentials, loadCredentials, loadSettings, resolveModel, Credentials } from "./config.js";
 import { Agent, Decision, Mode, UI } from "./agent.js";
 import { builtinTools, Tool } from "./tools.js";
@@ -27,7 +27,7 @@ import { CLASSIFIER_MODEL, EMBED_MODEL } from "./workersai.js";
 import { execFileSync } from "node:child_process";
 import { checkForUpdate, performUpdate, startupUpdateCheck, installDir } from "./update.js";
 
-const VERSION = "0.5.0";
+const VERSION = "0.5.1";
 const c = { dim: (s: string) => `\x1b[2m${s}\x1b[0m`, bold: (s: string) => `\x1b[1m${s}\x1b[0m`, cyan: (s: string) => `\x1b[36m${s}\x1b[0m`, green: (s: string) => `\x1b[32m${s}\x1b[0m`, red: (s: string) => `\x1b[31m${s}\x1b[0m`, yellow: (s: string) => `\x1b[33m${s}\x1b[0m`, magenta: (s: string) => `\x1b[35m${s}\x1b[0m` };
 
 function parseArgs(argv: string[]) {
@@ -89,6 +89,7 @@ Usage:
   atom -p "question"         print mode: answer once and exit (stdin is appended)
   atom -c | --continue       continue the most recent session here
   atom -r [id]               resume a session (pick from a list if no id)
+  atom trust [DIR] | untrust [DIR]   enable project hooks/MCP/plugins/allow rules for a folder
   atom login [--token T --account ID | --wrangler | --oauth | --gateway URL --key K]
   atom logout | atom whoami | atom models
   atom mcp list | atom mcp add NAME --url URL [--header K:V] | atom mcp add NAME -- CMD ARGS…  [--global]
@@ -258,6 +259,7 @@ async function main() {
     }
     if (cmd === "logout") { clearCredentials(); console.log("Logged out."); return; }
     if (cmd === "models") { for (const [k, v] of Object.entries(MODELS)) console.log(`${k.padEnd(16)} ${v}${v === DEFAULT_MODEL ? "  (default)" : ""}`); return; }
+    if (cmd === "trust" || cmd === "untrust") { const d = path.resolve(o._[1] || cwd); trustDir(d, cmd === "trust"); console.log(`${cmd === "trust" ? "Trusted" : "Untrusted"} ${d}${cmd === "trust" ? " (project hooks, MCP servers, allow rules and plugins in .atom/ are now enabled)" : ""}`); return; }
     if (cmd === "whoami") { const cr = loadCredentials(); console.log(cr ? (cr.kind === "gateway" ? `gateway ${cr.url}` : `${cr.kind} account ${cr.accountId}`) : "not logged in"); return; }
     if (cmd === "mcp" && o._[1] === "add") {
       const name = o._[2]; if (!name || (!o.url && !o.rest?.length)) throw new Error("usage: atom mcp add NAME --url URL | atom mcp add NAME -- CMD ARGS");
@@ -327,6 +329,7 @@ async function main() {
   try { project = o.project ? resolveProject(cwd, o.project === true ? currentProject()?.name : o.project) : resolveProject(cwd); } catch (e: any) { console.error(e.message); process.exit(1); }
   if (o.project && project) { cwd = project.root; process.chdir(cwd); }
   const settings: any = loadSettings(cwd);
+  if (!isTrusted(cwd) && projectNeedsTrust(cwd)) console.error(c.yellow(`! This folder's .atom/ settings (hooks, MCP servers, allow rules, plugins) are ignored until you trust it: atom trust`));
   if (project) { const ps = projectSettings(project); for (const [k, v] of Object.entries(ps)) settings[k] = k === "allow" ? [...(settings.allow || []), ...(v as any)] : k === "mcpServers" || k === "hooks" ? { ...(v as any), ...(settings[k] || {}) } : k === "plugins" ? [...(v as any), ...(settings.plugins || [])] : settings[k] ?? v; }
   settings.allow = [...(settings.allow || []), ...o.allow];
   const model = resolveModel(o.model || settings.model || DEFAULT_MODEL);

@@ -70,9 +70,34 @@ export interface Settings {
   autoUpdate?: boolean;
 }
 function readJson(p: string): any { try { return JSON.parse(fs.readFileSync(p, "utf8")); } catch { return {}; } }
-/** Merge user settings (~/.config/atom/settings.json) with project settings (.atom/settings.json). */
+// ---------- workspace trust ----------
+// Project files (.atom/settings.json hooks, MCP servers, allow rules, plugins in .atom/plugins) can run code.
+// They only take effect in folders the user has trusted (`atom trust`), so opening a cloned repo is safe.
+export const TRUST_FILE = path.join(CONFIG_DIR, "trusted.json");
+export function trustedDirs(): string[] { const j = readJson(TRUST_FILE); return Array.isArray(j.dirs) ? j.dirs : []; }
+export function isTrusted(cwd: string): boolean {
+  if (process.env.ATOM_TRUST_PROJECT === "1") return true;
+  let real = cwd; try { real = fs.realpathSync(cwd); } catch {}
+  return trustedDirs().some((d) => real === d || real.startsWith(d.endsWith(path.sep) ? d : d + path.sep));
+}
+export function trustDir(cwd: string, on = true) {
+  let real = cwd; try { real = fs.realpathSync(cwd); } catch {}
+  const dirs = new Set(trustedDirs()); on ? dirs.add(real) : dirs.delete(real);
+  ensureDir(CONFIG_DIR); fs.writeFileSync(TRUST_FILE, JSON.stringify({ dirs: [...dirs] }, null, 2), { mode: 0o600 });
+}
+/** True when the project has settings that only apply once trusted. */
+export function projectNeedsTrust(cwd: string): boolean {
+  const p = readJson(path.join(cwd, ".atom", "settings.json"));
+  let plug = false; try { plug = fs.readdirSync(path.join(cwd, ".atom", "plugins")).some((e) => !e.startsWith(".")); } catch {}
+  return plug || !!(p.hooks || p.mcpServers || p.allow || p.plugins || p.permissionMode);
+}
+const SAFE_MODES = new Set(["ask", "auto", "plan"]);
+/** Merge user settings (~/.config/atom/settings.json) with project settings (.atom/settings.json).
+ *  Code-running project settings (hooks, MCP servers, allow rules, plugins, permission mode) are ignored unless the folder is trusted. */
 export function loadSettings(cwd: string): Settings {
   const u = readJson(SETTINGS_FILE), p = readJson(path.join(cwd, ".atom", "settings.json"));
+  if (!isTrusted(cwd)) { delete p.hooks; delete p.mcpServers; delete p.allow; delete p.plugins; delete p.permissionMode; }
+  for (const x of [u, p]) if (x.permissionMode && !SAFE_MODES.has(x.permissionMode)) delete x.permissionMode; // bypass is CLI-flag only
   return {
     ...u, ...p,
     allow: [...(u.allow || []), ...(p.allow || [])],
