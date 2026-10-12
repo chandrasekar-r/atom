@@ -145,3 +145,33 @@ test("update: semver compare + changelog slicing", async () => {
   assert.equal(U.changelogBetween(cl, "0.2.0", "0.3.0"), "## v0.3.0\n- c");
   assert.match(U.changelogBetween(cl, "0.2.0", "0.4.0"), /v0\.4\.0[\s\S]*v0\.3\.0/);
 });
+
+// ---- v0.4.0: code graph (tree-sitter) ----
+import { CodeGraph as _CG } from "../dist/codegraph.js";
+test("code graph: defs, calls, imports, inherits across TS/Python/Go/Rust/Java", async () => {
+  const fs2 = await import("node:fs"); const os2 = await import("node:os"); const p2 = await import("node:path");
+  const d = fs2.mkdtempSync(p2.join(os2.tmpdir(), "cg-")); const w = (f, t) => { fs2.mkdirSync(p2.dirname(p2.join(d, f)), { recursive: true }); fs2.writeFileSync(p2.join(d, f), t); };
+  w("a.ts", 'import { helper } from "./b";\nexport class Base {}\nexport class Child extends Base { run() { return helper(1); } }\n');
+  w("b.ts", "export function helper(x: number) { return x + 1; }\n");
+  w("m.py", "from util import twice\nclass A:\n    pass\nclass B(A):\n    def go(self):\n        return twice(2)\n");
+  w("util.py", "def twice(x):\n    return x * 2\n");
+  w("g/main.go", "package main\nfunc add(a int) int { return a }\nfunc main() { add(1) }\n");
+  w("src/lib.rs", "mod util;\ntrait Speak { fn hi(&self); }\nstruct Dog;\nimpl Speak for Dog { fn hi(&self) { bark(); } }\nfn bark() {}\n");
+  w("src/util.rs", "pub fn x() {}\n");
+  w("j/Foo.java", "package p;\nclass Foo extends Bar { void a() { b(); } void b() {} }\nclass Bar {}\n");
+  const g = new _CG(d); const r = await g.update(); assert.equal(r.errors, 0);
+  assert.ok(g.findSymbol("helper").length);
+  assert.deepEqual(g.callersOf(g.findSymbol("helper")[0].id), ["a.ts#Child.run"]);
+  assert.ok(g.data.files["a.ts"].imports.includes("b.ts"));
+  assert.ok(g.data.files["m.py"].imports.includes("util.py"));
+  assert.ok(g.data.files["src/lib.rs"].imports.includes("src/util.rs"));
+  assert.ok(g.callersOf(g.findSymbol("twice")[0].id).some((x) => x.endsWith("B.go")));
+  assert.ok(g.callersOf("g/main.go#add").includes("g/main.go#main"));
+  assert.ok(g.callersOf(g.findSymbol("Foo.b")[0].id).includes("j/Foo.java#Foo.a"));
+  assert.ok(g.impact("a.ts#Base").some((x) => x.id === "a.ts#Child" && x.via === "inherits"));
+  assert.ok(g.impact("b.ts").some((x) => x.id === "a.ts"));
+  assert.ok(g.neighbors("src/lib.rs#Dog").some((n) => n.edge === "inherits"));
+  assert.match(g.export("mermaid"), /a\.ts.*-->\|imports\|/s);
+  assert.match(g.export("dot", "b.ts#helper"), /digraph/);
+  const before = g.data.files["b.ts"].hash; w("b.ts", "export function helper(x: number) { return x + 2; }\n"); const r2 = await g.update(); assert.equal(r2.parsed, 1); assert.notEqual(g.data.files["b.ts"].hash, before);
+});

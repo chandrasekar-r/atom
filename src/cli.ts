@@ -20,13 +20,14 @@ import { loadSkills, skillTool, parseFrontmatter } from "./skills.js";
 import { PluginHost } from "./plugins.js";
 import { webSearchTool, webSearch } from "./websearch.js";
 import { memoryTools, indexTools } from "./extratools.js";
+import { CodeGraph } from "./codegraph.js";
 import { expandMentions } from "./mentions.js";
 import { addProject, listProjects, removeProject, switchProject, resolveProject, currentProject, projectContext, projectSettings, projectDir, Project } from "./projects.js";
 import { CLASSIFIER_MODEL, EMBED_MODEL } from "./workersai.js";
 import { execFileSync } from "node:child_process";
 import { checkForUpdate, performUpdate, startupUpdateCheck, installDir } from "./update.js";
 
-const VERSION = "0.3.1";
+const VERSION = "0.4.0";
 const c = { dim: (s: string) => `\x1b[2m${s}\x1b[0m`, bold: (s: string) => `\x1b[1m${s}\x1b[0m`, cyan: (s: string) => `\x1b[36m${s}\x1b[0m`, green: (s: string) => `\x1b[32m${s}\x1b[0m`, red: (s: string) => `\x1b[31m${s}\x1b[0m`, yellow: (s: string) => `\x1b[33m${s}\x1b[0m`, magenta: (s: string) => `\x1b[35m${s}\x1b[0m` };
 
 function parseArgs(argv: string[]) {
@@ -58,6 +59,17 @@ function parseArgs(argv: string[]) {
     else if (a === "--quiet") o.quiet = true;
     else if (a === "--yes" || a === "-y") o.yes = true;
     else if (a === "--dir") o.dir = argv[++i];
+    else if (a === "--domain") o.domain = argv[++i];
+    else if (a === "--name") o.name = argv[++i];
+    else if (a === "--github-user") o.githubUser = argv[++i];
+    else if (a === "--github-client-id") o.githubClientId = argv[++i];
+    else if (a === "--prompt") o.prompt = argv[++i];
+    else if (a === "--session") o.session = argv[++i];
+    else if (a === "--wait") o.wait = true;
+    else if (a === "--no-files") o.noFiles = true;
+    else if (a === "--message") o.message = argv[++i];
+    else if (a === "--format") o.format = argv[++i];
+    else if (a === "--depth") o.depth = argv[++i];
     else if (a === "--") { o.rest = argv.slice(i + 1); break; }
     else if (a === "-h" || a === "--help") o.help = true;
     else if (a === "-v" || a === "--version") o.version = true;
@@ -80,6 +92,13 @@ Usage:
   atom project add NAME [PATH] | list | switch NAME | show [NAME] | remove NAME
   atom index [--status | --clear]        build/refresh the semantic code index (bge-m3)
   atom memory [list | add TEXT | search Q | forget ID | sync | clear]
+  atom cloud setup [--domain HOST] [--github-user LOGIN] [--github-client-id ID] [--token CF_TOKEN]
+                                         deploy Atom Cloud to your own Cloudflare account
+  atom cloud login [--token GH_TOKEN]    sign in with GitHub (device flow, or gh/GH_TOKEN)
+  atom cloud push [--session ID] [--prompt TEXT]   hand the current session + uncommitted work to the cloud
+  atom cloud ls | attach ID [--prompt TEXT --wait] | pull ID [--no-files] | commit ID --message M | rm ID
+  atom graph [build|stats|symbol|callers|callees|impact|neighbors NAME|export [NAME] --format dot|mermaid]
+                                         query the tree-sitter code graph
   atom update [--check]                  update from GitHub releases (gh auth / GH_TOKEN; git installs use git)
   atom skills | atom plugins | atom plugin install NPM_PKG | atom search QUERY
 
@@ -97,7 +116,7 @@ const SLASH_LIST = [
   ["help", "show help"], ["clear", "start a fresh conversation"], ["compact", "summarize history [focus]"], ["model", "show or switch model"], ["cost", "token + neuron usage"],
   ["init", "write ATOM.md for this project"], ["resume", "switch to a past session"], ["rewind", "restore files + chat to before a turn"], ["tree", "session tree: branch from any message"],
   ["fork", "copy this conversation into a new session"], ["mode", "ask | auto | plan | bypass"], ["memory", "long-term memory: list | add | search | forget | sync | clear"], ["mcp", "list MCP tools"],
-  ["skills", "list skills (/<skill> to run one)"], ["plugins", "list plugins"], ["agents", "custom subagents"], ["index", "refresh semantic code index"], ["project", "projects"],
+  ["skills", "list skills (/<skill> to run one)"], ["plugins", "list plugins"], ["agents", "custom subagents"], ["index", "refresh semantic code index"], ["cloud", "continue this session in Atom Cloud"], ["project", "projects"],
   ["status", "account, model, session"], ["login", "credentials"], ["logout", "remove credentials"], ["exit", "quit"],
 ].map(([name, hint]) => ({ name, hint }));
 const TUI_HELP = SLASH_LIST.map((x) => `  /${x.name.padEnd(9)} ${x.hint}`).join("\n") + `\n  Custom: .atom/commands/<name>.md -> /<name> [args]\n  Press ? on an empty prompt for keyboard shortcuts.`;
@@ -130,6 +149,48 @@ async function loadMcp(settings: any, ui: (s: string) => void): Promise<{ tools:
     catch (e: any) { ui(c.yellow(`mcp: ${name} failed: ${e.message}`)); }
   }
   return { tools, clients };
+}
+
+async function graphCommand(o: any, cwd: string) {
+  const g = new CodeGraph(cwd); const sub = o._[1] || "stats"; const q = o._.slice(2).join(" ");
+  if (sub === "build" || !g.exists()) { const r = await g.update((m) => process.stderr.write(`\r${m}  `)); process.stderr.write("\r"); if (sub === "build") console.log(`parsed ${r.parsed}, removed ${r.removed}, errors ${r.errors}`); } else await g.update();
+  const ids = () => { const r = g.resolveNode(q); if (!r.length) throw new Error(`no symbol or file ${q}`); return r; };
+  if (sub === "stats" || sub === "build") { const s = g.stats(); console.log(`${s.files} files, ${s.symbols} symbols, ${s.edges} edges · ${s.langs.join(", ")}\n${c.dim(s.file)}`); return; }
+  if (sub === "symbol" || sub === "find") { for (const d of g.findSymbol(q, 50)) console.log(`${d.file}:${d.line}  ${d.parent ? d.parent + "." : ""}${d.name}  ${c.dim(d.kind)}`); return; }
+  if (sub === "callers" || sub === "callees") { for (const id of ids()) { console.log(c.bold(g.label(id))); for (const x of sub === "callers" ? g.callersOf(id) : g.calleesOf(id)) console.log("  " + g.label(x)); } return; }
+  if (sub === "impact") { for (const id of ids().slice(0, 3)) { const r = g.impact(id, o.depth ? +o.depth : 4); console.log(c.bold(`${g.label(id)}: ${r.length} dependents`)); for (const x of r) console.log(`  ${c.dim(`d${x.depth} ${x.via.padEnd(10)}`)} ${g.label(x.id)}`); } return; }
+  if (sub === "neighbors" || sub === "neighborhood") { const id = ids()[0]; const n = g.neighborhood(id, 1); console.log(c.bold(g.label(id))); for (const e of n.edges) console.log(`  ${e.from} -${e.edge}-> ${e.to}`); return; }
+  if (sub === "export") { const fmt = o.format === "mermaid" ? "mermaid" : "dot"; process.stdout.write(g.export(fmt, q ? ids()[0] : undefined, 2)); return; }
+  throw new Error("usage: atom graph [build|stats|symbol NAME|callers NAME|callees NAME|impact NAME|neighbors NAME|export [NAME] --format dot|mermaid]");
+}
+
+async function cloudCommand(o: any, cwd: string, question: (q: string) => Promise<string>) {
+  const C = await import("./cloud.js"); const sub = o._[1], id = o._[2]; const log = (t: string) => console.log(t);
+  if (sub === "setup") { await C.cloudSetup({ token: o.token, account: o.account, name: o.name, domain: o.domain, githubUser: o.githubUser, githubClientId: o.githubClientId, log }); console.log(c.dim("next: atom cloud login")); return; }
+  if (sub === "use") { if (!id) throw new Error("usage: atom cloud use URL"); C.saveCloud({ ...C.loadCloud(), url: id.replace(/\/$/, "") }); console.log(`using ${id}`); return; }
+  if (sub === "login") { console.log(c.green(`signed in to Atom Cloud as ${await C.cloudLogin({ token: o.token, log })}`)); return; }
+  if (sub === "push") {
+    const s = o.session ? loadSession(o.session) : listSessions(cwd)[0]; if (!s) throw new Error("no local session here (start one with atom, or pass --session ID)");
+    let memory: string[] = []; const cr = loadCredentials();
+    if (cr && !o.noMemory) { const proj = resolveProject(cwd); memory = new LongTermMemory(cr, proj ? `project:${proj.name}` : `dir:${cwd}`, {}).visible().map((m) => m.text); }
+    const r = await C.cloudPush(s, { memory, prompt: o.prompt, model: o.model ? resolveModel(o.model) : undefined, log });
+    console.log(c.green(`cloud session ${r.id}`) + `\n  web:    ${r.url}\n  follow: atom cloud attach ${r.id}\n  back:   atom cloud pull ${r.id}`);
+    if (o.wait) await C.cloudFollow(r.id, log, { untilIdle: true });
+    return;
+  }
+  if (sub === "ls" || sub === "list" || !sub) { const l = await C.cloudList(); console.log(l.length ? l.map((s) => `${s.id}  ${new Date(s.created).toLocaleString()}  ${s.repo}${s.branch ? "@" + s.branch : ""}  ${s.title}`).join("\n") : "no cloud sessions"); return; }
+  if (!id) throw new Error(`usage: atom cloud ${sub} ID`);
+  if (sub === "attach") {
+    if (o.prompt) { const after = await C.cloudFollow(id, () => {}, { untilIdle: false, signal: AbortSignal.timeout(1) }).catch(() => 0); await C.cloudSend(id, o.prompt); if (o.wait) { await C.cloudFollow(id, log, { after, untilIdle: true }); return; } }
+    console.log(c.dim("attached; type a message and Enter to continue the session, Ctrl+D to detach"));
+    const ac = new AbortController(); const follow = C.cloudFollow(id, log, { signal: ac.signal });
+    for (;;) { let line: string; try { line = await question(""); } catch { break; } if (line === undefined || line === null) break; if (line.trim()) await C.cloudSend(id, line.trim()).catch((e: any) => log(c.red(e.message))); if (!process.stdin.readable) break; }
+    ac.abort(); await follow.catch(() => {}); return;
+  }
+  if (sub === "pull") { await C.cloudPull(id, cwd, { files: !o.noFiles, log }); return; }
+  if (sub === "commit") { console.log((await C.cloudCommit(id, o.message || "Changes from Atom Cloud")).result); return; }
+  if (sub === "rm") { await C.cloudDelete(id); console.log(`deleted ${id}`); return; }
+  throw new Error("unknown cloud command: " + sub);
 }
 
 async function memoryCommand(ltm: LongTermMemory, line: string): Promise<string> {
@@ -206,6 +267,8 @@ async function main() {
       const name = pkg.startsWith("@") ? "@" + pkg.slice(1).split("@")[0] : pkg.split("@")[0];
       j.plugins = [...new Set([...(j.plugins || []), name])]; fs.writeFileSync(f, JSON.stringify(j, null, 2)); console.log(c.green(`installed plugin ${name}`)); return;
     }
+    if (cmd === "graph") { await graphCommand(o, cwd); return; }
+    if (cmd === "cloud") { await cloudCommand(o, cwd, question); return; }
     if (cmd === "search") { const h = await webSearch(o._.slice(1).join(" ")); h.forEach((x, i) => console.log(`${i + 1}. ${x.title}\n   ${x.url}\n   ${c.dim(x.snippet)}`)); return; }
     if (cmd === "index" || cmd === "memory") {
       const cr = loadCredentials(); if (!cr) throw new Error("Not logged in. Run `atom login`.");
@@ -215,13 +278,15 @@ async function main() {
         const idx = new RepoIndex(cr, root);
         if (o._[1] === "--clear" || o._[1] === "clear" || process.argv.includes("--clear")) { idx.clear(); console.log("index cleared"); return; }
         if (!process.argv.includes("--status")) { const t0 = Date.now(); const u = await idx.update((m) => process.stderr.write(`\r${m}   `)); process.stderr.write("\n"); console.log(`indexed ${root}: +${u.added} added, ~${u.changed} changed, -${u.removed} removed, ${u.chunks} chunks embedded with ${EMBED_MODEL} in ${((Date.now() - t0) / 1000).toFixed(1)}s`); }
+        if (!process.argv.includes("--status")) { const t1 = Date.now(); const gr = await new CodeGraph(root).update(); console.log(`graph: ${gr.parsed} files parsed, ${gr.removed} removed${gr.errors ? `, ${gr.errors} errors` : ""} in ${((Date.now() - t1) / 1000).toFixed(1)}s`); }
+        const gs = new CodeGraph(root).stats(); console.log(`graph: ${gs.files} files, ${gs.symbols} symbols, ${gs.edges} edges (${gs.langs.join(", ")})\n  ${c.dim(gs.file)}`);
         const st2 = idx.stats(); console.log(`index: ${st2.files} files, ${st2.chunks} chunks, updated ${st2.updated ? new Date(st2.updated).toLocaleString() : "never"}\n  ${c.dim(st2.file)}`); return;
       }
       const ltm = new LongTermMemory(cr, proj ? `project:${proj.name}` : `dir:${root}`, loadSettings(cwd).memory || {});
       const [, sub, ...restA] = o._; const arg = restA.join(" ");
       console.log(await memoryCommand(ltm, sub ? `${sub} ${arg}`.trim() : "")); return;
     }
-  } finally { if (["login", "logout", "models", "whoami", "mcp", "project", "skills", "plugins", "plugin", "search", "index", "memory", "update"].includes(cmd)) rl.close(); }
+  } finally { if (["login", "logout", "models", "whoami", "mcp", "project", "skills", "plugins", "plugin", "search", "index", "memory", "update", "cloud", "graph"].includes(cmd)) rl.close(); }
 
   let creds = loadCredentials();
   if (!creds) {
@@ -359,6 +424,12 @@ async function main() {
         if (!arg || arg === "files") say((mem.files.length ? "Instruction files:\n" + mem.files.map((f) => "  " + f).join("\n") : "No ATOM.md loaded. Run /init.") + "\n");
         if (arg !== "files") say(ltm ? await memoryCommand(ltm, arg) : "Long-term memory is off (--no-memory or settings.memory.enabled=false).");
         if (agent.lastRoute) say(c.dim(`last route: intent=${agent.lastRoute.intent} remember=${agent.lastRoute.remember.toFixed(2)} recall=${agent.lastRoute.recall.toFixed(2)}`));
+        return true;
+      }
+      case "cloud": {
+        saveSession(s); const C = await import("./cloud.js");
+        try { const r = await C.cloudPush(s, { memory: ltm ? ltm.visible().map((m) => m.text) : [], prompt: arg || undefined, log: (t) => say(c.dim(t)) }); say(c.green(`continuing in the cloud: ${r.url}`) + c.dim(`\n  atom cloud attach ${r.id}   ·   atom cloud pull ${r.id}`)); }
+        catch (e: any) { say(c.red(e.message)); }
         return true;
       }
       case "skills": { const sk = skills(); say(sk.length ? sk.map((x) => `  /${x.name.padEnd(20)} ${x.description.slice(0, 80)}`).join("\n") : "No skills. Add .atom/skills/<name>/SKILL.md"); return true; }

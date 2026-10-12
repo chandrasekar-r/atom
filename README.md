@@ -136,6 +136,44 @@ User settings live in `~/.config/atom/settings.json`, project settings in `.atom
 
 Sessions are stored in `~/.config/atom/sessions/`, along with the conversation, usage and file snapshots.
 
+## Atom Cloud (v0.4.0)
+
+Continue a session in the cloud, on **your own** Cloudflare account, then pick it up from the browser or pull it back.
+
+```bash
+atom cloud setup --github-user YOUR_LOGIN            # deploy (or --domain cloud.example.com)
+atom cloud login                                      # GitHub sign-in
+atom cloud push --prompt "finish the refactor and open a PR"   # or /cloud inside a session
+atom cloud ls
+atom cloud attach ID                                  # stream + type to continue
+atom cloud pull ID                                    # session + branch back on your machine
+```
+
+- `setup` needs a Cloudflare token that can edit Workers (`CLOUDFLARE_API_TOKEN`, `--token`, or an existing `wrangler login`).
+  It deploys one Worker with a SQLite Durable Object class (one object per session) and the Workers AI binding.
+- Only the GitHub user given by `--github-user` can use the API or the web UI.
+- GitHub sign-in: create a GitHub OAuth App (Settings → Developer settings → OAuth Apps, enable *Device Flow*,
+  any callback URL) and pass `--github-client-id` to `setup` for device-flow login in the CLI and browser.
+  Without one, `atom cloud login` uses your `gh auth token` / `GH_TOKEN`, and the web UI accepts a pasted token.
+  The token needs `repo` scope; the cloud agent uses it to read the repo, push branches and open pull requests.
+- `push` sends the conversation, long-term memories, todos, the GitHub remote/branch/commit (pushing the branch first
+  if the commit is not on GitHub yet) and the contents of uncommitted files.
+- The cloud agent has file tools (list/read/write/edit/delete/grep), todos, web fetch, `git_commit_push` and
+  `open_pull_request`. There is no shell in the cloud yet.
+
+## Code graph and hybrid search (v0.4.0)
+
+`atom index` also builds a tree-sitter code graph (TS/JS/Python/Go/Rust/Java) in `.atom/graph.json`.
+The agent gets `find_symbol`, `find_callers`, `find_callees`, `impact_analysis` and `graph_neighborhood`,
+and `semantic_search` becomes hybrid: embedding seeds → graph neighbours → Workers AI reranker.
+
+```bash
+atom graph stats
+atom graph callers chargeCard
+atom graph impact src/money.go
+atom graph export PlaceOrder --format mermaid > graph.mmd
+```
+
 ## New in v0.3.0
 
 See [CHANGELOG.md](CHANGELOG.md) for the full list.

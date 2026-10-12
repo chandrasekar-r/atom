@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.4.0
+- **Atom Cloud**: hand a session off to your own Cloudflare account and continue it there or in the browser.
+  `atom cloud setup` deploys a Worker + Durable Object (one per session) running the Atom agent loop on Workers AI;
+  `atom cloud login` signs in with GitHub (device flow with your own OAuth app, or your `gh`/GH_TOKEN credentials);
+  `atom cloud push` / `/cloud` uploads messages, long-term memory, todos, branch and uncommitted files;
+  `atom cloud ls | attach | pull | commit | rm`; web UI at your worker URL, restricted to one GitHub user.
+  The cloud agent edits a copy of the repo and commits/pushes branches and opens PRs through the GitHub API.
+- **Code graph** (tree-sitter WASM; TypeScript/TSX/JavaScript/Python/Go/Rust/Java): files and symbols with imports, calls,
+  defines, inherits and type-reference edges, stored in `.atom/graph.json`, updated incrementally by content hash.
+  New tools `find_symbol`, `find_callers`, `find_callees`, `impact_analysis`, `graph_neighborhood`; `atom graph` CLI with DOT/Mermaid export.
+- **Hybrid search**: `semantic_search` now seeds with embeddings, expands along the code graph and reranks with
+  `@cf/baai/bge-reranker-base` (rank fusion fallback). On an 18-question eval over a multi-language microservices repo:
+  hit@5 50% → 78%, MRR@5 0.41 → 0.55 versus embeddings alone (`test/eval-hybrid.mjs`).
+- `atom index` builds both the embedding index and the code graph. Embedding requests are batched by size.
+
 ## v0.3.1
 - Published on npm as `@rclabs/atom` (`npm i -g @rclabs/atom`). `atom update` now uses the npm registry for npm installs.
 

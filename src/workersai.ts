@@ -20,12 +20,11 @@ export async function runModel(c: Credentials, model: string, input: any, signal
 
 /** Embed texts with a bge model (batched). */
 export async function embed(c: Credentials, texts: string[], model = EMBED_MODEL): Promise<number[][]> {
-  const out: number[][] = [];
-  for (let i = 0; i < texts.length; i += 32) {
-    const r = await runModel(c, model, { text: texts.slice(i, i + 32).map((t) => t.slice(0, 6000) || " ") });
-    out.push(...r.data);
-  }
-  return out;
+  // batch by count and size: bge-m3 accepts ~60k tokens per request
+  const out: number[][] = []; let batch: string[] = [], size = 0;
+  const flush = async () => { if (!batch.length) return; const r = await runModel(c, model, { text: batch }); out.push(...r.data); batch = []; size = 0; };
+  for (const t0 of texts) { const t = t0.slice(0, 3000) || " "; if (batch.length >= 16 || size + t.length > 24_000) await flush(); batch.push(t); size += t.length; }
+  await flush(); return out;
 }
 
 export function cosine(a: ArrayLike<number>, b: ArrayLike<number>): number {
