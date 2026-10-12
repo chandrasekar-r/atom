@@ -47,6 +47,7 @@ export async function cloudSetup(o: SetupOpts): Promise<CloudConfig> {
     { type: "secret_text", name: "COOKIE_SECRET", text: cookieSecret },
     { type: "plain_text", name: "GITHUB_CLIENT_ID", text: githubClientId },
     ...(secret ? [{ type: "secret_text", name: "GITHUB_CLIENT_SECRET", text: secret }] : []),
+    ...(process.env.ATOM_WEB_RETURN_URL ? [{ type: "plain_text", name: "WEB_RETURN_URL", text: process.env.ATOM_WEB_RETURN_URL }] : []),
   ];
   const upload = async (migrations?: any) => {
     const fd = new FormData();
