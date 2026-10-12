@@ -58,10 +58,11 @@ export default {
     // GitHub web OAuth flow (needs GITHUB_CLIENT_SECRET; callback must match the OAuth app)
     if (p === "/auth/github") {
       if (!env.GITHUB_CLIENT_SECRET) return new Response("web sign-in not configured", { status: 501 });
-      const state = crypto.randomUUID(); const sig = await hmac(env.COOKIE_SECRET, "state:" + state);
+      const forWeb = url.searchParams.get("for") === "web" && env.WEB_RETURN_URL; const hs = (url.searchParams.get("hs") || "").replace(/[^a-f0-9]/g, "").slice(0, 64);
+      const state = (forWeb ? "w-" + hs + "-" : "") + crypto.randomUUID(); const sig = await hmac(env.COOKIE_SECRET, "state:" + state);
       const to = new URL("https://github.com/login/oauth/authorize");
-      to.searchParams.set("client_id", clientId(env)); to.searchParams.set("redirect_uri", url.origin + "/auth/github/callback"); to.searchParams.set("scope", "repo"); to.searchParams.set("state", state);
-      if (env.ALLOWED_GITHUB_LOGIN) to.searchParams.set("login", env.ALLOWED_GITHUB_LOGIN);
+      to.searchParams.set("client_id", clientId(env)); to.searchParams.set("redirect_uri", url.origin + "/auth/github/callback"); to.searchParams.set("scope", forWeb ? "read:user" : "repo"); to.searchParams.set("state", state);
+      if (env.ALLOWED_GITHUB_LOGIN && !forWeb) to.searchParams.set("login", env.ALLOWED_GITHUB_LOGIN);
       return new Response(null, { status: 302, headers: { location: to.toString(), "set-cookie": `atom_state=${state}.${sig}; Path=/auth; HttpOnly; Secure; SameSite=Lax; Max-Age=600` } });
     }
     if (p === "/auth/github/callback") {
@@ -71,10 +72,24 @@ export default {
       if (!state || !code || state !== st || sig !== await hmac(env.COOKIE_SECRET, "state:" + st)) return page("Sign-in failed: invalid or expired state. Try again.", 400);
       const r = await (await fetch("https://github.com/login/oauth/access_token", { method: "POST", headers: { accept: "application/json", "content-type": "application/json" }, body: JSON.stringify({ client_id: clientId(env), client_secret: env.GITHUB_CLIENT_SECRET, code, redirect_uri: url.origin + "/auth/github/callback" }) })).json();
       if (!r.access_token) return page("GitHub sign-in failed: " + (r.error_description || r.error || "no token"), 400);
+      if (st.startsWith("w-") && env.WEB_RETURN_URL) {
+        // public web app sign-in: any GitHub user; hand identity over via a one-time ticket
+        const u = await (await fetch("https://api.github.com/user", { headers: { authorization: `Bearer ${r.access_token}`, "user-agent": "atom-cloud" } })).json();
+        if (!u.id) return page("GitHub sign-in failed.", 400);
+        const ticket = crypto.randomUUID().replace(/-/g, "");
+        await env.SESSIONS.get(env.SESSIONS.idFromName("__index__")).fetch("https://do/index/ticket-put", { method: "POST", body: JSON.stringify({ ticket, id: u.id, login: u.login, exp: Date.now() + 120000 }) });
+        const back = new URL(env.WEB_RETURN_URL); back.searchParams.set("ticket", ticket); back.searchParams.set("hs", st.split("-")[1]);
+        return new Response(null, { status: 302, headers: { location: back.toString(), "set-cookie": "atom_state=; Path=/auth; Max-Age=0" } });
+      }
       const login = await githubLogin(r.access_token);
       if (!login || login.toLowerCase() !== (env.ALLOWED_GITHUB_LOGIN || "").toLowerCase()) return page(`GitHub user ${login || "?"} is not allowed on this Atom Cloud.`);
       const h = new Headers({ location: "/" }); h.append("set-cookie", await makeCookie(env, login, r.access_token)); h.append("set-cookie", "atom_state=; Path=/auth; Max-Age=0");
       return new Response(null, { status: 302, headers: h });
+    }
+    if (p === "/auth/ticket" && req.method === "POST") {
+      if (!env.INTERNAL_KEY || req.headers.get("x-internal-key") !== env.INTERNAL_KEY) return json({ error: "forbidden" }, 403);
+      const { ticket } = await req.json();
+      return env.SESSIONS.get(env.SESSIONS.idFromName("__index__")).fetch("https://do/index/ticket-take", { method: "POST", body: JSON.stringify({ ticket }) });
     }
     if (p === "/auth/token" && req.method === "POST") { const { token } = await req.json(); return finishLogin(env, token); }
     if (p === "/auth/logout") return new Response(null, { status: 302, headers: { location: "/", "set-cookie": "atom_session=; Path=/; Max-Age=0" } });
@@ -220,6 +235,9 @@ export class AtomSession {
 
   // --- index (list of sessions), lives in the "__index__" object
   async indexOp(p, req) {
+    if (p === "/index/ticket-put") { const b = await req.json(); await this.state.storage.put("t:" + b.ticket, b); return json({ ok: true }); }
+    if (p === "/index/ticket-take") { const { ticket } = await req.json(); const k = "t:" + String(ticket || ""); const t = await this.state.storage.get(k); if (t) await this.state.storage.delete(k);
+      if (!t || t.exp < Date.now()) return json({ error: "invalid ticket" }, 400); return json({ id: t.id, login: t.login }); }
     const all = await this.get("sessions", {});
     if (p === "/index/list") return json({ sessions: Object.values(all).sort((a, b) => b.created - a.created) });
     const b = await req.json();
