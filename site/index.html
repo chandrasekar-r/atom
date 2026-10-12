@@ -1,7 +1,7 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Atom: a terminal coding agent on Workers AI</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/asciinema-player@3.8.0/dist/bundle/asciinema-player.css">
 <style>body{font:16px/1.6 ui-sans-serif,system-ui;max-width:820px;margin:48px auto;padding:0 20px;background:#faf9f5;color:#1f1e1d}h1{font-size:2rem;margin:0}h2{font-size:1.15rem;margin-top:2rem}code,pre{font-family:ui-monospace,Menlo,monospace}pre{background:#1f1e1d;color:#e8e6dc;padding:16px;border-radius:10px;overflow:auto;font-size:13px;line-height:1.45}.d{color:#8a877c}.c{color:#7fb8d4}.g{color:#9cc68a}.r{color:#e08b7f}.m{color:#c99be0}.y{color:#e6c47a}.b{font-weight:700}a{color:#c15f3c}ul{padding-left:20px}.tag{display:inline-block;background:#1f1e1d;color:#faf9f5;border-radius:6px;padding:0 8px;font-size:13px;margin-left:6px;vertical-align:middle}</style></head><body>
-<h1>✻ Atom <span class="tag">v0.4.0</span></h1>
+<h1>✻ Atom <span class="tag">v0.4.1</span></h1>
 <p>A terminal coding agent that runs on <b>your Cloudflare account's Workers AI</b> models (gpt-oss-120b, Llama 3.3 70B, Llama 4 Scout for images, Kimi K2.7 Code, GLM 5.3, Qwen Coder). v0.3.0 adds long-term memory, web search, remote MCP, plugins, skills, a semantic repo index, projects and self-update, on top of a full-screen terminal interface.</p>
 <pre><span class="d">&gt; First call todo_write … fix the bug in @math.js using edit_file …</span>
 <span class="d">  ⎿  Read math.js (2 lines)</span>
@@ -46,6 +46,8 @@
 <li>Loads <code>AGENTS.md</code> and <code>ATOM.md</code>. Lines starting with <code>#</code> are saved to memory.</li>
 <li>Image input: Ctrl+V pastes from the clipboard, and you can also paste or <code>@</code> a .png path (use with llama-4-scout)</li>
 <li>Kept from v0.1: file checkpoints with <code>/rewind</code>, <code>-p</code> print/JSON mode, MCP (stdio), hooks, custom commands, <code>/resume</code>, and <code>/cost</code></li></ul>
+<h2>New in v0.4.1</h2>
+<ul><li>Built-in GitHub sign-in with <code>atom login github</code>, using device flow. The token is kept in your OS keychain. Atom Cloud asks you to sign in automatically, and its web UI has a <b>Sign in with GitHub</b> button.</li></ul>
 <h2>New in v0.4.0</h2>
 <ul><li><b>Atom Cloud</b>: <code>atom cloud setup</code> deploys a Worker + Durable Object to <b>your</b> Cloudflare account. <code>/cloud</code> or <code>atom cloud push</code> hands off the session (messages, memory, todos, branch and uncommitted files), and you can continue it from <code>atom cloud attach</code> or the web UI behind GitHub sign-in. The cloud agent pushes branches and opens PRs. <code>atom cloud pull</code> brings the session and branch back.</li>
 <li><b>Code graph</b>: tree-sitter for TS/JS/Python/Go/Rust/Java. It records imports, calls, inheritance and references, and adds the <code>find_callers</code>, <code>impact_analysis</code> and <code>atom graph</code> tools. Graphs export to DOT or Mermaid.</li>

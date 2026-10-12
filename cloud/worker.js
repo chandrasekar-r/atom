@@ -4,6 +4,8 @@
 // GitHub token of the single allowed GitHub user. Deployed by `atom cloud setup`.
 const GH = "https://api.github.com";
 const MODEL_DEFAULT = "@cf/openai/gpt-oss-120b";
+const BUILTIN_CLIENT_ID = "Ov23liR9UOCfO9Pe75kG"; // Atom CLI public OAuth app (device flow)
+const clientId = (env) => env.GITHUB_CLIENT_ID || BUILTIN_CLIENT_ID;
 const json = (d, s = 200, h = {}) => new Response(JSON.stringify(d), { status: s, headers: { "content-type": "application/json", ...h } });
 const enc = new TextEncoder();
 async function hmac(secret, data) { const k = await crypto.subtle.importKey("raw", enc.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]); return [...new Uint8Array(await crypto.subtle.sign("HMAC", k, enc.encode(data)))].map((b) => b.toString(16).padStart(2, "0")).join(""); }
@@ -40,19 +42,39 @@ async function makeCookie(env, login, token) {
 export default {
   async fetch(req, env) {
     const url = new URL(req.url); const p = url.pathname;
-    if (p === "/health") return json({ ok: true, service: "atom-cloud", deviceFlow: !!env.GITHUB_CLIENT_ID, user: env.ALLOWED_GITHUB_LOGIN || null });
+    if (p === "/health") return json({ ok: true, service: "atom-cloud", deviceFlow: true, webFlow: !!env.GITHUB_CLIENT_SECRET, user: env.ALLOWED_GITHUB_LOGIN || null });
     if (p === "/" || p === "/ui") return new Response(UI, { headers: { "content-type": "text/html; charset=utf-8" } });
     // GitHub device flow (needs your own OAuth app's client id with device flow enabled)
     if (p === "/auth/device" && req.method === "POST") {
-      if (!env.GITHUB_CLIENT_ID) return json({ error: "device flow not configured (GITHUB_CLIENT_ID)" }, 501);
-      const r = await fetch("https://github.com/login/device/code", { method: "POST", headers: { accept: "application/json", "content-type": "application/json" }, body: JSON.stringify({ client_id: env.GITHUB_CLIENT_ID, scope: "repo" }) });
+      const r = await fetch("https://github.com/login/device/code", { method: "POST", headers: { accept: "application/json", "content-type": "application/json" }, body: JSON.stringify({ client_id: clientId(env), scope: "repo" }) });
       return json(await r.json());
     }
     if (p === "/auth/device/poll" && req.method === "POST") {
       const { device_code } = await req.json();
-      const r = await (await fetch("https://github.com/login/oauth/access_token", { method: "POST", headers: { accept: "application/json", "content-type": "application/json" }, body: JSON.stringify({ client_id: env.GITHUB_CLIENT_ID, device_code, grant_type: "urn:ietf:params:oauth:grant-type:device_code" }) })).json();
+      const r = await (await fetch("https://github.com/login/oauth/access_token", { method: "POST", headers: { accept: "application/json", "content-type": "application/json" }, body: JSON.stringify({ client_id: clientId(env), device_code, grant_type: "urn:ietf:params:oauth:grant-type:device_code" }) })).json();
       if (!r.access_token) return json(r, 202);
       return finishLogin(env, r.access_token);
+    }
+    // GitHub web OAuth flow (needs GITHUB_CLIENT_SECRET; callback must match the OAuth app)
+    if (p === "/auth/github") {
+      if (!env.GITHUB_CLIENT_SECRET) return new Response("web sign-in not configured", { status: 501 });
+      const state = crypto.randomUUID(); const sig = await hmac(env.COOKIE_SECRET, "state:" + state);
+      const to = new URL("https://github.com/login/oauth/authorize");
+      to.searchParams.set("client_id", clientId(env)); to.searchParams.set("redirect_uri", url.origin + "/auth/github/callback"); to.searchParams.set("scope", "repo"); to.searchParams.set("state", state);
+      if (env.ALLOWED_GITHUB_LOGIN) to.searchParams.set("login", env.ALLOWED_GITHUB_LOGIN);
+      return new Response(null, { status: 302, headers: { location: to.toString(), "set-cookie": `atom_state=${state}.${sig}; Path=/auth; HttpOnly; Secure; SameSite=Lax; Max-Age=600` } });
+    }
+    if (p === "/auth/github/callback") {
+      const ck = /(?:^|;\s*)atom_state=([^;]+)/.exec(req.headers.get("cookie") || "")?.[1] || ""; const [st, sig] = ck.split(".");
+      const state = url.searchParams.get("state"), code = url.searchParams.get("code");
+      const page = (msg, s = 403) => new Response(`<!doctype html><meta charset=utf-8><p>${msg.replace(/</g, "&lt;")}</p><p><a href="/">Back</a></p>`, { status: s, headers: { "content-type": "text/html; charset=utf-8", "set-cookie": "atom_state=; Path=/auth; Max-Age=0" } });
+      if (!state || !code || state !== st || sig !== await hmac(env.COOKIE_SECRET, "state:" + st)) return page("Sign-in failed: invalid or expired state. Try again.", 400);
+      const r = await (await fetch("https://github.com/login/oauth/access_token", { method: "POST", headers: { accept: "application/json", "content-type": "application/json" }, body: JSON.stringify({ client_id: clientId(env), client_secret: env.GITHUB_CLIENT_SECRET, code, redirect_uri: url.origin + "/auth/github/callback" }) })).json();
+      if (!r.access_token) return page("GitHub sign-in failed: " + (r.error_description || r.error || "no token"), 400);
+      const login = await githubLogin(r.access_token);
+      if (!login || login.toLowerCase() !== (env.ALLOWED_GITHUB_LOGIN || "").toLowerCase()) return page(`GitHub user ${login || "?"} is not allowed on this Atom Cloud.`);
+      const h = new Headers({ location: "/" }); h.append("set-cookie", await makeCookie(env, login, r.access_token)); h.append("set-cookie", "atom_state=; Path=/auth; Max-Age=0");
+      return new Response(null, { status: 302, headers: h });
     }
     if (p === "/auth/token" && req.method === "POST") { const { token } = await req.json(); return finishLogin(env, token); }
     if (p === "/auth/logout") return new Response(null, { status: 302, headers: { location: "/", "set-cookie": "atom_session=; Path=/; Max-Age=0" } });
@@ -282,7 +304,7 @@ async function load(){cur=$('sess').value;after=0;$('log').textContent='';const 
 async function send(){const t=$('msg').value.trim();if(!t||!cur)return;$('msg').value='';await api('/api/sessions/'+cur+'/messages',{method:'POST',body:JSON.stringify({text:t})});poll();}
 async function commit(){if(!cur)return;const m=prompt('Commit message','Changes from Atom Cloud');if(!m)return;const r=await api('/api/sessions/'+cur+'/commit',{method:'POST',body:JSON.stringify({message:m})});line('p',r.result);}
 async function start(){try{const me=await api('/api/me');$('who').textContent='signed in as '+me.login;$('app').hidden=false;$('auth').innerHTML='';const l=await api('/api/sessions');$('sess').innerHTML=l.sessions.map(s=>'<option value="'+s.id+'">'+(s.title||s.id).replace(/</g,'&lt;')+' · '+s.repo+'</option>').join('');if(l.sessions.length)load();}
- catch(e){const h=await (await fetch('/health')).json();$('auth').innerHTML='<p>Sign in with GitHub as <b>'+(h.user||'?')+'</b>.</p>'+(h.deviceFlow?'<button onclick="device()">Sign in with GitHub</button> ':'')+'<details'+(h.deviceFlow?'':' open')+'><summary>or paste a GitHub token</summary><input id="tok" type="password" size="50"> <button onclick="tok()">Use token</button></details><p id="dv"></p>';}}
+ catch(e){const h=await (await fetch('/health')).json();$('auth').innerHTML='<p>Sign in with GitHub as <b>'+(h.user||'?')+'</b>.</p>'+(h.webFlow?'<p><a href="/auth/github"><button>Sign in with GitHub</button></a></p>':'<p><button onclick="device()">Sign in with GitHub</button></p>')+'<details><summary>or paste a GitHub token</summary><input id="tok" type="password" size="50"> <button onclick="tok()">Use token</button></details><p id="dv"></p>';}}
 async function tok(){const r=await fetch('/auth/token',{method:'POST',body:JSON.stringify({token:$('tok').value})});if(r.ok)start();else $('dv').textContent=(await r.json()).error;}
 async function device(){const d=await (await fetch('/auth/device',{method:'POST'})).json();$('dv').innerHTML='Open <a target=_blank href="'+d.verification_uri+'">'+d.verification_uri+'</a> and enter <b>'+d.user_code+'</b>';
  const iv=setInterval(async()=>{const r=await fetch('/auth/device/poll',{method:'POST',body:JSON.stringify({device_code:d.device_code})});if(r.status===200){clearInterval(iv);start();}else if(r.status===403){clearInterval(iv);$('dv').textContent=(await r.json()).error;}},(d.interval||5)*1000+500);}

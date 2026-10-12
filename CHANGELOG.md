@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.4.1
+- Built-in GitHub sign-in: `atom login github` (also `atom cloud login`) uses OAuth device flow with the public
+  "Atom CLI" app. Override it with `--github-client-id` or `ATOM_GITHUB_CLIENT_ID`. The token is stored in the OS keychain
+  (macOS Keychain, libsecret) or in `~/.config/atom/github.json` with mode 0600, and is checked against GitHub.
+  `atom logout github` removes it.
+- `atom cloud push`, `ls`, `attach` and the other cloud commands use the stored token and start a sign-in automatically when needed.
+- Atom Cloud web UI: "Sign in with GitHub" uses the GitHub web OAuth flow, protected by a signed state cookie and limited to
+  the allowed user, when `GITHUB_CLIENT_SECRET` is set (`atom cloud setup --github-client-secret`). Otherwise
+  the browser uses device flow. Pasting a token remains as a fallback.
+
 ## v0.4.0
 - **Atom Cloud**: hand a session off to your own Cloudflare account and continue it there or in the browser.
   `atom cloud setup` deploys a Worker + Durable Object (one per session) running the Atom agent loop on Workers AI;

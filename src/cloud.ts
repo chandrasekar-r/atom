@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { CONFIG_DIR, ensureDir } from "./config.js";
 import { readWranglerToken } from "./login.js";
 import { Session, newSession, saveSession } from "./session.js";
+import { BUILTIN_CLIENT_ID, ensureGithub, githubDeviceLogin, githubTokenLogin, loadGithubAuth } from "./github.js";
 
 /** Atom Cloud client: deploy the cloud worker to the user's own Cloudflare account, sign in with GitHub,
  *  hand a local session to the cloud, follow/continue it, and bring it back. */
@@ -28,23 +29,24 @@ export async function githubLoginFor(token: string): Promise<string | null> {
   const r = await fetch("https://api.github.com/user", { headers: { authorization: `Bearer ${token}`, "user-agent": "atom-cli" } });
   return r.ok ? ((await r.json()) as any).login : null;
 }
-export interface SetupOpts { token?: string; account?: string; name?: string; domain?: string; githubUser?: string; githubClientId?: string; log: (s: string) => void }
+export interface SetupOpts { token?: string; account?: string; name?: string; domain?: string; githubUser?: string; githubClientId?: string; githubClientSecret?: string; log: (s: string) => void }
 export async function cloudSetup(o: SetupOpts): Promise<CloudConfig> {
   const cfg = loadCloud();
   const token = o.token || process.env.CLOUDFLARE_API_TOKEN || readWranglerToken()?.token;
   if (!token) throw new Error("need a Cloudflare token that can edit Workers: pass --token, set CLOUDFLARE_API_TOKEN, or run `npx wrangler login` first");
   let account = o.account || process.env.CLOUDFLARE_ACCOUNT_ID || cfg.account;
   if (!account) { const a = await cf(token, "/accounts"); if (a.length !== 1) throw new Error(`token sees ${a.length} accounts; pass --account ID (${a.map((x: any) => `${x.id} ${x.name}`).join(", ")})`); account = a[0].id; }
-  const githubUser = o.githubUser || cfg.githubUser || (cfg.github?.login) || (await (async () => { const t = process.env.GH_TOKEN || sh("gh", ["auth", "token"]); return t ? githubLoginFor(t) : null; })());
+  const githubUser = o.githubUser || cfg.githubUser || (await (async () => { const t = loadGithubAuth()?.token || process.env.GH_TOKEN || sh("gh", ["auth", "token"]); return t ? githubLoginFor(t) : null; })());
   if (!githubUser) throw new Error("which GitHub user may use this cloud? pass --github-user LOGIN");
   const script = o.name || cfg.script || "atom-cloud"; const cookieSecret = cfg.cookieSecret || crypto.randomBytes(32).toString("hex");
-  const githubClientId = o.githubClientId ?? cfg.githubClientId ?? "";
+  const githubClientId = o.githubClientId || cfg.githubClientId || BUILTIN_CLIENT_ID; const secret = o.githubClientSecret || process.env.ATOM_GITHUB_CLIENT_SECRET;
   const bindings: any[] = [
     { type: "ai", name: "AI" },
     { type: "durable_object_namespace", name: "SESSIONS", class_name: "AtomSession" },
     { type: "plain_text", name: "ALLOWED_GITHUB_LOGIN", text: githubUser },
     { type: "secret_text", name: "COOKIE_SECRET", text: cookieSecret },
-    ...(githubClientId ? [{ type: "plain_text", name: "GITHUB_CLIENT_ID", text: githubClientId }] : []),
+    { type: "plain_text", name: "GITHUB_CLIENT_ID", text: githubClientId },
+    ...(secret ? [{ type: "secret_text", name: "GITHUB_CLIENT_SECRET", text: secret }] : []),
   ];
   const upload = async (migrations?: any) => {
     const fd = new FormData();
@@ -65,41 +67,23 @@ export async function cloudSetup(o: SetupOpts): Promise<CloudConfig> {
     await cf(token, `/accounts/${account}/workers/scripts/${script}/subdomain`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: true }) });
     const sub = await cf(token, `/accounts/${account}/workers/subdomain`); url = `https://${script}.${sub.subdomain}.workers.dev`;
   }
-  const next = { ...cfg, url, account, script, cookieSecret, githubUser, githubClientId: githubClientId || undefined };
+  const next = { ...cfg, url, account, script, cookieSecret, githubUser, githubClientId };
   saveCloud(next); o.log(`Atom Cloud is at ${url} (only GitHub user ${githubUser} can sign in)`); return next;
 }
 
 // ---------------- auth ----------------
 async function api(p: string, init: RequestInit = {}): Promise<any> {
   const c = loadCloud(); if (!c.url) throw new Error("Atom Cloud is not set up: run `atom cloud setup` (or `atom cloud use URL`)");
-  if (!c.github?.token) throw new Error("not signed in: run `atom cloud login`");
-  const r = await fetch(c.url + p, { ...init, headers: { authorization: `Bearer ${c.github.token}`, "content-type": "application/json", ...(init.headers || {}) } });
+  const gh = await ensureGithub((s) => console.error(s), { clientId: c.githubClientId });
+  const r = await fetch(c.url + p, { ...init, headers: { authorization: `Bearer ${gh.token}`, "content-type": "application/json", ...(init.headers || {}) } });
   const j: any = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(`${p}: ${r.status} ${j.error || ""}`); return j;
 }
-export async function cloudLogin(o: { token?: string; log: (s: string) => void }): Promise<string> {
-  const c = loadCloud(); if (!c.url) throw new Error("run `atom cloud setup` (or `atom cloud use URL`) first");
-  let token = o.token || "";
-  if (!token) {
-    const h: any = await (await fetch(c.url + "/health")).json();
-    if (h.deviceFlow) {
-      const d: any = await (await fetch(c.url + "/auth/device", { method: "POST" })).json();
-      o.log(`Open ${d.verification_uri} and enter code ${d.user_code}`);
-      for (;;) {
-        await new Promise((r) => setTimeout(r, (d.interval || 5) * 1000 + 300));
-        const r = await fetch("https://github.com/login/oauth/access_token", { method: "POST", headers: { accept: "application/json", "content-type": "application/json" }, body: JSON.stringify({ client_id: c.githubClientId, device_code: d.device_code, grant_type: "urn:ietf:params:oauth:grant-type:device_code" }) });
-        const j: any = await r.json(); if (j.access_token) { token = j.access_token; break; }
-        if (j.error && !/authorization_pending|slow_down/.test(j.error)) throw new Error("GitHub device flow: " + j.error);
-      }
-    } else {
-      token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN || sh("gh", ["auth", "token"]);
-      if (!token) throw new Error("no GitHub OAuth app configured for device flow; pass --token, set GH_TOKEN, or `gh auth login`");
-      o.log("using your GitHub CLI / GH_TOKEN credentials");
-    }
-  }
-  const login = await githubLoginFor(token); if (!login) throw new Error("GitHub rejected the token");
-  saveCloud({ ...loadCloud(), github: { token, login } });
-  await api("/api/me"); return login;
+export async function cloudLogin(o: { token?: string; clientId?: string; log: (s: string) => void }): Promise<string> {
+  const c = loadCloud();
+  const a = o.token ? await githubTokenLogin(o.token) : await githubDeviceLogin({ clientId: o.clientId || c.githubClientId, log: o.log });
+  o.log(`GitHub token saved (${a.store === "keychain" ? "OS keychain" : "~/.config/atom/github.json, mode 0600"})`);
+  if (c.url) await api("/api/me"); return a.login;
 }
 
 // ---------------- push / ls / attach / pull ----------------

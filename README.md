@@ -142,7 +142,7 @@ Continue a session in the cloud, on **your own** Cloudflare account, then pick i
 
 ```bash
 atom cloud setup --github-user YOUR_LOGIN            # deploy (or --domain cloud.example.com)
-atom cloud login                                      # GitHub sign-in
+atom login github                                     # GitHub sign-in (device flow)
 atom cloud push --prompt "finish the refactor and open a PR"   # or /cloud inside a session
 atom cloud ls
 atom cloud attach ID                                  # stream + type to continue
@@ -152,9 +152,9 @@ atom cloud pull ID                                    # session + branch back on
 - `setup` needs a Cloudflare token that can edit Workers (`CLOUDFLARE_API_TOKEN`, `--token`, or an existing `wrangler login`).
   It deploys one Worker with a SQLite Durable Object class (one object per session) and the Workers AI binding.
 - Only the GitHub user given by `--github-user` can use the API or the web UI.
-- GitHub sign-in: create a GitHub OAuth App (Settings → Developer settings → OAuth Apps, enable *Device Flow*,
-  any callback URL) and pass `--github-client-id` to `setup` for device-flow login in the CLI and browser.
-  Without one, `atom cloud login` uses your `gh auth token` / `GH_TOKEN`, and the web UI accepts a pasted token.
+- GitHub sign-in is built in: `atom login github` runs device flow with the public Atom CLI OAuth app, and cloud commands
+  prompt for it automatically. The token goes to your OS keychain or a 0600 file. To use your own OAuth app, pass `--github-client-id`
+  (and `--github-client-secret` to `setup` for browser sign-in; set the app's callback to `https://<your worker>/auth/github/callback`).
   The token needs `repo` scope; the cloud agent uses it to read the repo, push branches and open pull requests.
 - `push` sends the conversation, long-term memories, todos, the GitHub remote/branch/commit (pushing the branch first
   if the commit is not on GitHub yet) and the contents of uncommitted files.

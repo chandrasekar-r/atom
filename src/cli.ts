@@ -27,7 +27,7 @@ import { CLASSIFIER_MODEL, EMBED_MODEL } from "./workersai.js";
 import { execFileSync } from "node:child_process";
 import { checkForUpdate, performUpdate, startupUpdateCheck, installDir } from "./update.js";
 
-const VERSION = "0.4.0";
+const VERSION = "0.4.1";
 const c = { dim: (s: string) => `\x1b[2m${s}\x1b[0m`, bold: (s: string) => `\x1b[1m${s}\x1b[0m`, cyan: (s: string) => `\x1b[36m${s}\x1b[0m`, green: (s: string) => `\x1b[32m${s}\x1b[0m`, red: (s: string) => `\x1b[31m${s}\x1b[0m`, yellow: (s: string) => `\x1b[33m${s}\x1b[0m`, magenta: (s: string) => `\x1b[35m${s}\x1b[0m` };
 
 function parseArgs(argv: string[]) {
@@ -63,6 +63,7 @@ function parseArgs(argv: string[]) {
     else if (a === "--name") o.name = argv[++i];
     else if (a === "--github-user") o.githubUser = argv[++i];
     else if (a === "--github-client-id") o.githubClientId = argv[++i];
+    else if (a === "--github-client-secret") o.githubClientSecret = argv[++i];
     else if (a === "--prompt") o.prompt = argv[++i];
     else if (a === "--session") o.session = argv[++i];
     else if (a === "--wait") o.wait = true;
@@ -94,7 +95,8 @@ Usage:
   atom memory [list | add TEXT | search Q | forget ID | sync | clear]
   atom cloud setup [--domain HOST] [--github-user LOGIN] [--github-client-id ID] [--token CF_TOKEN]
                                          deploy Atom Cloud to your own Cloudflare account
-  atom cloud login [--token GH_TOKEN]    sign in with GitHub (device flow, or gh/GH_TOKEN)
+  atom login github [--token T]          sign in with GitHub (device flow; token kept in the OS keychain or a 0600 file)
+  atom cloud login                       same as atom login github
   atom cloud push [--session ID] [--prompt TEXT]   hand the current session + uncommitted work to the cloud
   atom cloud ls | attach ID [--prompt TEXT --wait] | pull ID [--no-files] | commit ID --message M | rm ID
   atom graph [build|stats|symbol|callers|callees|impact|neighbors NAME|export [NAME] --format dot|mermaid]
@@ -166,9 +168,9 @@ async function graphCommand(o: any, cwd: string) {
 
 async function cloudCommand(o: any, cwd: string, question: (q: string) => Promise<string>) {
   const C = await import("./cloud.js"); const sub = o._[1], id = o._[2]; const log = (t: string) => console.log(t);
-  if (sub === "setup") { await C.cloudSetup({ token: o.token, account: o.account, name: o.name, domain: o.domain, githubUser: o.githubUser, githubClientId: o.githubClientId, log }); console.log(c.dim("next: atom cloud login")); return; }
+  if (sub === "setup") { await C.cloudSetup({ token: o.token, account: o.account, name: o.name, domain: o.domain, githubUser: o.githubUser, githubClientId: o.githubClientId, githubClientSecret: o.githubClientSecret, log }); console.log(c.dim("next: atom cloud push (GitHub sign-in happens automatically)")); return; }
   if (sub === "use") { if (!id) throw new Error("usage: atom cloud use URL"); C.saveCloud({ ...C.loadCloud(), url: id.replace(/\/$/, "") }); console.log(`using ${id}`); return; }
-  if (sub === "login") { console.log(c.green(`signed in to Atom Cloud as ${await C.cloudLogin({ token: o.token, log })}`)); return; }
+  if (sub === "login") { console.log(c.green(`signed in as ${await C.cloudLogin({ token: o.token, clientId: o.githubClientId, log })}`)); return; }
   if (sub === "push") {
     const s = o.session ? loadSession(o.session) : listSessions(cwd)[0]; if (!s) throw new Error("no local session here (start one with atom, or pass --session ID)");
     let memory: string[] = []; const cr = loadCredentials();
@@ -222,6 +224,12 @@ async function main() {
   let say = (t: string) => console.log(t);
   const cmd = o._[0];
   try {
+    if (cmd === "login" && o._[1] === "github") {
+      const G = await import("./github.js");
+      const a = o.token ? await G.githubTokenLogin(o.token) : await G.githubDeviceLogin({ clientId: o.githubClientId, log: (t) => console.log(t) });
+      console.log(c.green(`Signed in to GitHub as ${a.login}`) + c.dim(` (token in ${a.store === "keychain" ? "OS keychain" : "~/.config/atom/github.json, 0600"})`)); return;
+    }
+    if (cmd === "logout" && o._[1] === "github") { (await import("./github.js")).clearGithubToken(); console.log("Signed out of GitHub."); return; }
     if (cmd === "login") {
       if (o.gateway) await loginGateway(o.gateway, o.key || (await question("Gateway key: ")));
       else if (o.wrangler) await loginWrangler();
