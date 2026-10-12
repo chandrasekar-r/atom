@@ -1,5 +1,8 @@
 # Changelog
 
+## v0.3.1
+- Published on npm as `@rclabs/atom` (`npm i -g @rclabs/atom`). `atom update` now uses the npm registry for npm installs.
+
 ## v0.3.0
 - Long-term memory that lasts across sessions:
   - The Cloudflare Clef-flash classifier decides what is worth remembering and what to recall.

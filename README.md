@@ -9,9 +9,7 @@ Atom is original open-source software (MIT).
 You need Node 22 or newer and **your own Cloudflare account**. The free plan works, since Workers AI includes 10,000 free neurons a day.
 
 ```bash
-npm i -g @chandrasekar-r/atom
-# or install the packed build attached to the GitHub release:
-npm i -g https://github.com/chandrasekar-r/atom/releases/download/v0.3.0/chandrasekar-r-atom-0.3.0.tgz
+npm i -g @rclabs/atom
 # or build from source
 git clone https://github.com/chandrasekar-r/atom && cd atom && npm i && npm run build && npm link
 ```

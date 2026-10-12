@@ -26,7 +26,7 @@ async function gh(pathname: string, token: string | null): Promise<any> {
   if (!r.ok) throw new Error(`GitHub ${pathname}: ${r.status}`); return r.json();
 }
 export interface Latest { version: string; tag: string; notes: string; source: "release" | "tag" | "git" | "npm"; url?: string; asset?: string }
-export const NPM_NAME = "@chandrasekar-r/atom";
+export const NPM_NAME = "@rclabs/atom";
 async function npmLatest(): Promise<string | null> { try { const r = await fetch(`https://registry.npmjs.org/${NPM_NAME.replace("/", "%2F")}/latest`); if (!r.ok) return null; return (await r.json() as any).version || null; } catch { return null; } }
 const isNpmGlobal = (dir: string) => dir.split(path.sep).includes("node_modules");
 

@@ -34,7 +34,7 @@ def idle(timeout=240):
     raise AssertionError("agent did not go idle\n" + t.text())
 
 @test("startup banner + AGENTS.md loaded")
-def _(): t.expect(r"Atom v0\.3\.0"); t.expect(r"memory: AGENTS\.md"); t.settle(); t.snap(f"{EV}/01-start.txt")
+def _(): t.expect(r"Atom v0\.3\.1"); t.expect(r"memory: AGENTS\.md"); t.settle(); t.snap(f"{EV}/01-start.txt")
 
 @test("slash menu autocomplete")
 def _():

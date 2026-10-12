@@ -46,7 +46,7 @@ await test("interactive: permission prompt, diff, /cost, custom command, /rewind
   fs.writeFileSync(path.join(dir, ".atom", "commands", "shout.md"), "Reply with only the word $ARGUMENTS in uppercase. Do not use tools.");
   fs.writeFileSync(path.join(dir, "ATOM.md"), "# Project\nAlways end replies with the token ~atom~.\n");
   const r = repl();
-  await r.expect(/Atom.*v0\.3\.0/); await r.expect(/memory: ATOM\.md/);
+  await r.expect(/Atom.*v0\.3\.1/); await r.expect(/memory: ATOM\.md/);
   await r.expect(/> /);
   r.send("Create hello.txt containing exactly the line: hello world. Use write_file.");
   await r.expect(/Allow write_file\?/); await r.expect(/\+ hello world/); await r.expect(/\[n\]o > /);
