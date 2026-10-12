@@ -1,0 +1,36 @@
+✻ Atom v0.3.0
+  @cf/openai/gpt-oss-120b · /tmp/atom-tui-dx3q179j
+  memory: AGENTS.md
+  ? for shortcuts · / for commands · @ to mention files · esc to interrupt
+
+╭───────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ > /co                                                                                                     │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+❯ /compact  summarize history [focus]
+  /cost  token + neuron usage
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

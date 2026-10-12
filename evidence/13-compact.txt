@@ -1,0 +1,36 @@
+⏺   ↳ grep(add\s*=)
+  ⎿  math.js:1:export const add=(a,b)=>a+b;
+⏺   ↳ repo_map({"path":""})
+  ⎿  math.js
+⏺ task(Find file defining add function)
+  ⎿  The function `add` is defined in **math.js** at the repository root.
+
+     ~agents~
+✻ Thought for 16 tokens
+⏺ The add function is defined in math.js.
+
+  ~agents~
+Branched: active path now has 8 messages. Edit and press enter to continue on a new branch.
+
+> /tree
+
+> /model llama-4-scout
+model → @cf/meta/llama-4-scout-17b-16e-instruct (saved as default)
+
+> [image #1: red.png] What single color fills this image? One word.
+⏺ red ~agents~
+
+> /model gpt-oss-120b
+model → @cf/openai/gpt-oss-120b (saved as default)
+
+> /compact
+compacting…
+
+╭───────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ > Try "explain this repo", @file, /command, !shell                                                        │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+ ? shortcuts · shift+tab to cycle modes   gpt-oss-120b · ctx 5%
+
+
+
+

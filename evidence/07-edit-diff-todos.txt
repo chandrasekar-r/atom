@@ -1,0 +1,36 @@
+model → @cf/openai/gpt-oss-20b (saved as default)
+
+> /model llama-3.3-70b
+model → @cf/meta/llama-3.3-70b-instruct-fp8-fast (saved as default)
+
+> /model gpt-oss-120b
+model → @cf/openai/gpt-oss-120b (saved as default)
+
+> First call todo_write with two items (find bug, fix bug). Then fix the bug in @math.js using edit_file.
+Then call todo_write again marking both completed. Finally reply with a short markdown bullet list summary.
+  ⎿  Read math.js (2 lines)
+✻ Thought for 95 tokens
+⏺ todo_write(2 items)
+  ⎿  ☐ find bug
+     ☐ fix bug
+✻ Thought for 55 tokens
+⏺ edit_file(math.js)
+  ⎿  Edited math.js
+     - export const add=(a,b)=>a-b;
+     + export const add=(a,b)=>a+b;
+✻ Thought for 27 tokens
+⏺ todo_write(2 items)
+  ⎿  ☒ find bug
+     ☒ fix bug
+⏺ • Updated add function in math.js to correctly perform addition (a + b).
+  • Marked both “find bug” and “fix bug” tasks as completed.
+
+  ~agents~
+
+╭───────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ > Try "explain this repo", @file, /command, !shell                                                        │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+ ? shortcuts · shift+tab to cycle modes   gpt-oss-120b · ctx 2%
+
+
+

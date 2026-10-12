@@ -1,0 +1,36 @@
+✻ Atom v0.3.0
+  @cf/openai/gpt-oss-120b · /tmp/atom-tui-dx3q179j
+  memory: AGENTS.md
+  ? for shortcuts · / for commands · @ to mention files · esc to interrupt
+
+> /model
+model → @cf/openai/gpt-oss-20b (saved as default)
+
+> /model llama-3.3-70b
+model → @cf/meta/llama-3.3-70b-instruct-fp8-fast (saved as default)
+
+> /model gpt-oss-120b
+model → @cf/openai/gpt-oss-120b (saved as default)
+
+╭───────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ > Try "explain this repo", @file, /command, !shell                                                        │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+ ⏸ plan mode on (shift+tab to cycle)   gpt-oss-120b · ctx 0%
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

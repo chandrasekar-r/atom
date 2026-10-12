@@ -1,0 +1,36 @@
+✻ Atom v0.3.0
+  @cf/openai/gpt-oss-120b · /tmp/atom-tui-dx3q179j
+  memory: AGENTS.md
+  ? for shortcuts · / for commands · @ to mention files · esc to interrupt
+
+╭───────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ > Try "explain this repo", @file, /command, !shell                                                        │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+ ? shortcuts · shift+tab to cycle modes   gpt-oss-120b · ctx 0%
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

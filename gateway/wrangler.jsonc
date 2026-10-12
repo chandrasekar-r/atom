@@ -1,0 +1,3 @@
+{ "name": "atom-gateway", "main": "worker.js", "compatibility_date": "2025-09-01", "ai": { "binding": "AI" }, "workers_dev": true,
+  // optional: long-term memory sync (create with `wrangler d1 create atom-memory`)
+  "d1_databases": [{ "binding": "DB", "database_name": "atom-memory", "database_id": "<your-d1-database-id>" }] }

@@ -1,0 +1,7 @@
+node_modules
+dist
+.gateway_key
+.deploy-gw.js
+*.log
+.deploy-site.js
+test/__pycache__

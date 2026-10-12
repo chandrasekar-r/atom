@@ -1,0 +1,62 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Atom: a terminal coding agent on Workers AI</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/asciinema-player@3.8.0/dist/bundle/asciinema-player.css">
+<style>body{font:16px/1.6 ui-sans-serif,system-ui;max-width:820px;margin:48px auto;padding:0 20px;background:#faf9f5;color:#1f1e1d}h1{font-size:2rem;margin:0}h2{font-size:1.15rem;margin-top:2rem}code,pre{font-family:ui-monospace,Menlo,monospace}pre{background:#1f1e1d;color:#e8e6dc;padding:16px;border-radius:10px;overflow:auto;font-size:13px;line-height:1.45}.d{color:#8a877c}.c{color:#7fb8d4}.g{color:#9cc68a}.r{color:#e08b7f}.m{color:#c99be0}.y{color:#e6c47a}.b{font-weight:700}a{color:#c15f3c}ul{padding-left:20px}.tag{display:inline-block;background:#1f1e1d;color:#faf9f5;border-radius:6px;padding:0 8px;font-size:13px;margin-left:6px;vertical-align:middle}</style></head><body>
+<h1>✻ Atom <span class="tag">v0.3.0</span></h1>
+<p>A terminal coding agent that runs on <b>your Cloudflare account's Workers AI</b> models (gpt-oss-120b, Llama 3.3 70B, Llama 4 Scout for images, Kimi K2.7 Code, GLM 5.3, Qwen Coder). v0.3.0 adds long-term memory, web search, remote MCP, plugins, skills, a semantic repo index, projects and self-update, on top of a full-screen terminal interface.</p>
+<pre><span class="d">&gt; First call todo_write … fix the bug in @math.js using edit_file …</span>
+<span class="d">  ⎿  Read math.js (2 lines)</span>
+<span class="d"><i>✻ Thought for 70 tokens</i></span>
+<span class="g">⏺</span> <span class="b">todo_write</span><span class="d">(2 items)</span>
+  ⎿  <span class="y">◼</span> <span class="b">find bug</span>
+     ☐ fix bug
+<span class="g">⏺</span> <span class="b">edit_file</span><span class="d">(math.js)</span>
+  ⎿  Edited math.js
+     <span class="r">- export const add=(a,b)=&gt;a-b;</span>
+     <span class="g">+ export const add=(a,b)=&gt;a+b;</span>
+<span class="g">⏺</span> <span class="b">todo_write</span><span class="d">(2 items)</span>
+  ⎿  <span class="g">☒</span> <span class="d"><s>find bug</s></span>
+     <span class="g">☒</span> <span class="d"><s>fix bug</s></span>
+⏺ <span class="c">•</span> Fixed add in math.js to perform addition.
+<span class="d">╭──────────────────────────────────────────────────────────────╮</span>
+<span class="d">│</span> <span class="b">&gt;</span> <span class="d">Try "explain this repo", @file, /command, !shell</span>         <span class="d">│</span>
+<span class="d">╰──────────────────────────────────────────────────────────────╯</span>
+ <span class="m">⏵⏵ accept edits on</span><span class="d"> (shift+tab to cycle)   gpt-oss-120b · ctx 2%</span></pre>
+<h2>Recorded session (real pty, real Workers AI)</h2>
+<div id="cast"></div>
+<h2>New in v0.3.0</h2>
+<ul>
+<li><b>Long-term memory</b> that lasts across sessions. Cloudflare's <code>clef-flash</code> classifier decides what is worth remembering and when to recall it, and <code>bge-m3</code> embeddings store the facts locally. D1 sync through the gateway is optional. Manage it with <code>/memory</code>.</li>
+<li><b>Web search</b> with no key (DuckDuckGo, falling back to Bing RSS). The router nudges the model toward it when a question needs current information.</li>
+<li><b>MCP</b> over stdio, Streamable HTTP and SSE. Add a server with <code>atom mcp add NAME --url …</code>.</li>
+<li><b>Plugins</b> (local or npm): add tools, slash commands, event hooks, and bundled skills or commands</li>
+<li><b>Skills</b>: <code>SKILL.md</code> folders are auto-discovered from <code>.atom</code> and <code>.agents</code>. The model loads one when it's relevant, and you can also run it as <code>/skill</code>.</li>
+<li><b>Repo index</b>: <code>atom index</code> plus a <code>semantic_search</code> tool. Embeddings use bge-m3, the index respects .gitignore, and updates are incremental. There is also a <code>repo_map</code> tool.</li>
+<li><b>@ mentions</b> for folders, globs, line ranges <code>@file:10-40</code>, symbols <code>@#name</code> and images</li>
+<li><b>Projects</b>: <code>atom project add/list/switch</code> and <code>atom -P</code>. Each project has its own instructions, knowledge files, settings, memory and sessions.</li>
+<li>Custom subagents in <code>.atom/agents</code>, and an arrow-key <code>/model</code> picker</li>
+<li><b><code>atom update</code></b>, plus a daily background check shown in the footer. Set <code>autoUpdate</code> to install automatically.</li>
+</ul>
+<h2>What's in it</h2>
+<ul>
+<li>Differential TUI: streaming Markdown, a spinner with elapsed time and token count, and <b>Esc</b> to interrupt</li>
+<li><b>Shift+Tab</b> cycles the ask, accept-edits, plan and bypass modes. Permission dialogs show coloured diffs.</li>
+<li>Slash-command menu with autocomplete, <b>@</b> fuzzy file mentions (the file is inlined), multiline input (\⏎ or Alt+⏎), and persistent history</li>
+<li>Inline todo list, a <code>task</code> subagent tool, automatic <code>/compact</code> near the context limit, and visible thinking (Ctrl+T)</li>
+<li>Session tree: <code>/tree</code> or Esc Esc lets you branch from any earlier message, and <code>/fork</code> copies the chat into a new session</li>
+<li>Loads <code>AGENTS.md</code> and <code>ATOM.md</code>. Lines starting with <code>#</code> are saved to memory.</li>
+<li>Image input: Ctrl+V pastes from the clipboard, and you can also paste or <code>@</code> a .png path (use with llama-4-scout)</li>
+<li>Kept from v0.1: file checkpoints with <code>/rewind</code>, <code>-p</code> print/JSON mode, MCP (stdio), hooks, custom commands, <code>/resume</code>, and <code>/cost</code></li></ul>
+<h2>Install: bring your own Cloudflare account</h2>
+<p class="d">The public npm and GitHub release is rolling out now. These commands start working as soon as it goes live.</p>
+<pre><span class="d">$</span> npm i -g @chandrasekar-r/atom      <span class="d"># Node 22+</span>
+<span class="d">$</span> atom login                         <span class="d"># opens a pre-filled "Workers AI Read + Edit" token page; paste the token</span>
+<span class="d">$</span> atom                               <span class="d"># start in your project</span></pre>
+<p>If npm isn't available yet, install the packed release instead: <code>npm i -g https://github.com/chandrasekar-r/atom/releases/download/v0.3.0/chandrasekar-r-atom-0.3.0.tgz</code>. You can also log in with your own browser session through <code>atom login --wrangler</code>.</p>
+<ol><li>Create a free Cloudflare account at <a href="https://dash.cloudflare.com/sign-up">dash.cloudflare.com</a>. The Workers AI free tier includes 10,000 neurons a day.</li>
+<li>Run <code>atom login</code>. Atom detects your account ID and checks that the token really can run Workers AI before it saves anything to <code>~/.config/atom/credentials.json</code> (mode 0600).</li>
+<li>Everything runs in <b>your</b> account, and Atom has no server of its own. Keep it up to date with <code>atom update</code>.</li></ol>
+<p><a href="https://github.com/chandrasekar-r/atom">Source on GitHub (MIT)</a> · <a href="https://github.com/chandrasekar-r/atom/blob/main/CHANGELOG.md">Changelog</a></p>
+<p class="d">An independent project by <a href="https://rclabs.in">RC Labs</a>. It is not affiliated with Cloudflare.</p>
+<script src="https://cdn.jsdelivr.net/npm/asciinema-player@3.8.0/dist/bundle/asciinema-player.min.js"></script>
+<script>AsciinemaPlayer.create('/atom-tui.cast', document.getElementById('cast'), {cols:110, rows:36, idleTimeLimit:1.5, speed:2, fit:'width', theme:'monokai'});</script>
+</body></html>

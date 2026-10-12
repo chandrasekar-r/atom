@@ -1,0 +1,51 @@
+{
+  "name": "@chandrasekar-r/atom",
+  "version": "0.3.0",
+  "description": "Atom: a terminal coding agent powered by your Cloudflare account's Workers AI models",
+  "type": "module",
+  "bin": {
+    "atom": "bin/atom.js"
+  },
+  "files": [
+    "dist",
+    "bin",
+    "gateway",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p .",
+    "test": "npm run build && ATOM_CONFIG_DIR=$(mktemp -d) node --test test/unit.test.mjs",
+    "e2e:v3": "npm run build && node test/e2e-v3.mjs",
+    "e2e:update": "npm run build && node test/e2e-update.mjs",
+    "e2e": "npm run build && node test/e2e.mjs",
+    "e2e:tui": "npm run build && python3 test/tui_e2e.py",
+    "prepack": "tsc -p ."
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/chandrasekar-r/atom.git"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "@types/node": "^22.0.0"
+  },
+  "homepage": "https://atom.rclabs.in",
+  "keywords": [
+    "cli",
+    "coding-agent",
+    "cloudflare",
+    "workers-ai",
+    "mcp",
+    "agent",
+    "tui"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}
