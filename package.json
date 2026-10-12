@@ -1,6 +1,6 @@
 {
   "name": "@rclabs/atom",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "Atom: a terminal coding agent powered by your Cloudflare account's Workers AI models",
   "type": "module",
   "bin": {

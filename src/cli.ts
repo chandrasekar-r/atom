@@ -27,7 +27,7 @@ import { CLASSIFIER_MODEL, EMBED_MODEL } from "./workersai.js";
 import { execFileSync } from "node:child_process";
 import { checkForUpdate, performUpdate, startupUpdateCheck, installDir } from "./update.js";
 
-const VERSION = "0.4.1";
+const VERSION = "0.5.0";
 const c = { dim: (s: string) => `\x1b[2m${s}\x1b[0m`, bold: (s: string) => `\x1b[1m${s}\x1b[0m`, cyan: (s: string) => `\x1b[36m${s}\x1b[0m`, green: (s: string) => `\x1b[32m${s}\x1b[0m`, red: (s: string) => `\x1b[31m${s}\x1b[0m`, yellow: (s: string) => `\x1b[33m${s}\x1b[0m`, magenta: (s: string) => `\x1b[35m${s}\x1b[0m` };
 
 function parseArgs(argv: string[]) {
@@ -70,6 +70,8 @@ function parseArgs(argv: string[]) {
     else if (a === "--no-files") o.noFiles = true;
     else if (a === "--message") o.message = argv[++i];
     else if (a === "--format") o.format = argv[++i];
+    else if (a === "--repo") o.repo = argv[++i];
+    else if (a === "--branch") o.branch = argv[++i];
     else if (a === "--depth") o.depth = argv[++i];
     else if (a === "--") { o.rest = argv.slice(i + 1); break; }
     else if (a === "-h" || a === "--help") o.help = true;
@@ -98,6 +100,9 @@ Usage:
   atom login github [--token T]          sign in with GitHub (device flow; token kept in the OS keychain or a 0600 file)
   atom cloud login                       same as atom login github
   atom cloud push [--session ID] [--prompt TEXT]   hand the current session + uncommitted work to the cloud
+  atom cloud new OWNER/REPO [--branch B] [--prompt T]   start a cloud session on a GitHub repo
+  atom cloud diff ID | pr ID | memory    working-copy diff, open a PR, sync memory with the shared store
+  atom pull ID                           bring a cloud/web session (and its branch) to this machine
   atom cloud ls | attach ID [--prompt TEXT --wait] | pull ID [--no-files] | commit ID --message M | rm ID
   atom graph [build|stats|symbol|callers|callees|impact|neighbors NAME|export [NAME] --format dot|mermaid]
                                          query the tree-sitter code graph
@@ -180,6 +185,18 @@ async function cloudCommand(o: any, cwd: string, question: (q: string) => Promis
     if (o.wait) await C.cloudFollow(r.id, log, { untilIdle: true });
     return;
   }
+  if (sub === "memory") {
+    const cr = loadCredentials(); if (!cr) throw new Error("Not logged in. Run `atom login`.");
+    const proj = resolveProject(cwd); const ltm = new LongTermMemory(cr, proj ? `project:${proj.name}` : `dir:${cwd}`, {});
+    const r = await C.cloudMemorySync({ texts: () => ltm.visible().map((m) => m.text), add: (t) => ltm.add(t, "preference", "global") });
+    console.log(r.shared ? `memory synced with the shared store: pushed ${r.pushed}, pulled ${r.pulled}` : "this Atom Cloud has no shared store (bind SHARED to a D1 database)"); return;
+  }
+  if (sub === "new") {
+    const repo = o.repo || id; if (!repo || !repo.includes("/")) throw new Error("usage: atom cloud new OWNER/REPO [--branch B] [--prompt TEXT] [--wait]");
+    const r = await C.cloudNew(repo, { branch: o.branch, prompt: o.prompt }); console.log(c.green(`cloud session ${r.id}`) + `  ${C.loadCloud().url}/#${r.id}`);
+    if (o.prompt) { await C.cloudSend(r.id, o.prompt); if (o.wait) await C.cloudFollow(r.id, log, { untilIdle: true }); }
+    return;
+  }
   if (sub === "ls" || sub === "list" || !sub) { const l = await C.cloudList(); console.log(l.length ? l.map((s) => `${s.id}  ${new Date(s.created).toLocaleString()}  ${s.repo}${s.branch ? "@" + s.branch : ""}  ${s.title}`).join("\n") : "no cloud sessions"); return; }
   if (!id) throw new Error(`usage: atom cloud ${sub} ID`);
   if (sub === "attach") {
@@ -190,6 +207,8 @@ async function cloudCommand(o: any, cwd: string, question: (q: string) => Promis
     ac.abort(); await follow.catch(() => {}); return;
   }
   if (sub === "pull") { await C.cloudPull(id, cwd, { files: !o.noFiles, log }); return; }
+  if (sub === "diff") { const d = await C.cloudDiff(id); console.log(d.length ? d.map((f) => f.patch).join("\n") : "no changes"); return; }
+  if (sub === "pr") { const r = await C.cloudPR(id, o.message); console.log(r.url || r.error); return; }
   if (sub === "commit") { console.log((await C.cloudCommit(id, o.message || "Changes from Atom Cloud")).result); return; }
   if (sub === "rm") { await C.cloudDelete(id); console.log(`deleted ${id}`); return; }
   throw new Error("unknown cloud command: " + sub);
@@ -276,6 +295,7 @@ async function main() {
       j.plugins = [...new Set([...(j.plugins || []), name])]; fs.writeFileSync(f, JSON.stringify(j, null, 2)); console.log(c.green(`installed plugin ${name}`)); return;
     }
     if (cmd === "graph") { await graphCommand(o, cwd); return; }
+    if (cmd === "pull" && o._[1]) { o._ = ["cloud", "pull", o._[1]]; await cloudCommand(o, cwd, question); return; }
     if (cmd === "cloud") { await cloudCommand(o, cwd, question); return; }
     if (cmd === "search") { const h = await webSearch(o._.slice(1).join(" ")); h.forEach((x, i) => console.log(`${i + 1}. ${x.title}\n   ${x.url}\n   ${c.dim(x.snippet)}`)); return; }
     if (cmd === "index" || cmd === "memory") {
@@ -294,7 +314,7 @@ async function main() {
       const [, sub, ...restA] = o._; const arg = restA.join(" ");
       console.log(await memoryCommand(ltm, sub ? `${sub} ${arg}`.trim() : "")); return;
     }
-  } finally { if (["login", "logout", "models", "whoami", "mcp", "project", "skills", "plugins", "plugin", "search", "index", "memory", "update", "cloud", "graph"].includes(cmd)) rl.close(); }
+  } finally { if (["login", "logout", "models", "whoami", "mcp", "project", "skills", "plugins", "plugin", "search", "index", "memory", "update", "cloud", "graph", "pull"].includes(cmd)) rl.close(); }
 
   let creds = loadCredentials();
   if (!creds) {

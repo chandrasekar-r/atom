@@ -161,3 +161,18 @@ export async function cloudPull(id: string, cwd: string, o: { files?: boolean; l
   }
   return s;
 }
+export const cloudDiff = async (id: string) => (await api(`/api/sessions/${id}/diff`)).files as { path: string; status: string; patch: string }[];
+export const cloudPR = (id: string, title?: string) => api(`/api/sessions/${id}/pr`, { method: "POST", body: JSON.stringify({ title }) });
+export const cloudNew = (repo: string, o: { branch?: string; prompt?: string; title?: string }) => {
+  const [owner, name] = repo.split("/"); return api("/api/sessions", { method: "POST", body: JSON.stringify({ source: "cli", title: o.title || o.prompt?.slice(0, 80) || repo, repo: { owner, name, ...(o.branch ? { branch: o.branch } : {}) } }) });
+};
+/** Two-way merge between local long-term memory and the shared store (a D1 database bound to atom-cloud as SHARED). */
+export async function cloudMemorySync(local: { texts: () => string[]; add: (t: string) => Promise<unknown> }): Promise<{ pushed: number; pulled: number; shared: boolean }> {
+  const r = await api("/api/memory"); if (!r.shared) return { pushed: 0, pulled: 0, shared: false };
+  const remote: string[] = r.memories.map((m: any) => m.fact); const low = new Set(remote.map((x) => x.toLowerCase()));
+  const mine = local.texts(); const mineLow = new Set(mine.map((x) => x.toLowerCase()));
+  const toPush = mine.filter((t) => !low.has(t.toLowerCase()));
+  const pushed = toPush.length ? (await api("/api/memory", { method: "POST", body: JSON.stringify({ facts: toPush, source: "atom-cli" }) })).added : 0;
+  let pulled = 0; for (const t of remote) if (!mineLow.has(t.toLowerCase())) { await local.add(t); pulled++; }
+  return { pushed, pulled, shared: true };
+}

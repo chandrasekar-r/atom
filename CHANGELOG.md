@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.5.0
+- One backend for the terminal and the web: Atom Cloud sessions can be started, continued, diffed and turned into PRs from
+  the CLI, the Atom Cloud web UI, or a web assistant that proxies the same API (for example a harness "Code" tab).
+- `atom cloud new OWNER/REPO [--branch B] --prompt …` starts a cloud session directly on a GitHub repo.
+- `atom cloud diff ID` shows a unified diff of the cloud working copy, and `atom cloud pr ID` commits, pushes and opens a pull request.
+- `atom pull ID` brings any cloud session home, including sessions started from the web or handed off from a chat.
+- Shared memory: when atom-cloud has a `SHARED` D1 binding, `atom cloud memory` merges your long-term memory with it both
+  ways, and new cloud sessions start with those memories.
+- atom-cloud API: `GET /api/sessions/:id/diff`, `POST /api/sessions/:id/pr`, `GET/POST /api/memory`, `GET /api/projects`,
+  `GET /api/repos`; `POST /api/sessions` resolves a repo's default branch and records the session's source (cli/web/harness).
+
 ## v0.4.1
 - Built-in GitHub sign-in: `atom login github` (also `atom cloud login`) uses OAuth device flow with the public
   "Atom CLI" app. Override it with `--github-client-id` or `ATOM_GITHUB_CLIENT_ID`. The token is stored in the OS keychain

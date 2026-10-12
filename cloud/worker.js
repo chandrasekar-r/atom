@@ -81,14 +81,39 @@ export default {
 
     if (!p.startsWith("/api/")) return new Response("not found", { status: 404 });
     const who = await authed(req, env); if (!who) return json({ error: "unauthorized: sign in with GitHub as " + (env.ALLOWED_GITHUB_LOGIN || "(unset)") }, 401);
-    if (p === "/api/me") return json({ login: who.login });
+    if (p === "/api/me") return json({ login: who.login, shared: !!env.SHARED });
+    // shared memory / projects (optional D1 database bound as SHARED, with memories + projects tables)
+    if (p === "/api/memory") {
+      if (!env.SHARED) return json({ memories: [], shared: false });
+      if (req.method === "POST") {
+        const b = await req.json(); const facts = (b.facts || (b.fact ? [b.fact] : [])).map((f) => String(f).trim()).filter(Boolean).slice(0, 200);
+        const have = new Set((await env.SHARED.prepare("SELECT fact FROM memories").all()).results.map((r) => r.fact.toLowerCase()));
+        let added = 0; for (const f of facts) if (!have.has(f.toLowerCase())) { await env.SHARED.prepare("INSERT INTO memories (id, fact, source_conversation, created_at) VALUES (?1, ?2, ?3, ?4)").bind(crypto.randomUUID(), f, b.source || "atom", new Date().toISOString()).run(); have.add(f.toLowerCase()); added++; }
+        return json({ added });
+      }
+      const r = await env.SHARED.prepare("SELECT id, fact, source_conversation AS source, created_at FROM memories ORDER BY created_at DESC LIMIT 500").all();
+      return json({ memories: r.results, shared: true });
+    }
+    if (p === "/api/projects") {
+      if (!env.SHARED) return json({ projects: [] });
+      const r = await env.SHARED.prepare("SELECT id, name, description, instructions FROM projects ORDER BY updated_at DESC").all(); return json({ projects: r.results });
+    }
+    if (p === "/api/repos") {
+      const r = await gh(who.token, "/user/repos?per_page=100&sort=pushed&affiliation=owner,collaborator,organization_member");
+      return json({ repos: r.map((x) => ({ full_name: x.full_name, private: x.private, default_branch: x.default_branch, pushed_at: x.pushed_at })) });
+    }
     const index = env.SESSIONS.get(env.SESSIONS.idFromName("__index__"));
     if (p === "/api/sessions" && req.method === "GET") return index.fetch("https://do/index/list");
     if (p === "/api/sessions" && req.method === "POST") {
       const body = await req.json(); const id = body.id || crypto.randomUUID().slice(0, 12);
+      if (body.repo && (!body.repo.defaultBranch || !body.repo.branch)) {
+        const info = await gh(who.token, `/repos/${body.repo.owner}/${body.repo.name}`);
+        body.repo.defaultBranch ||= info.default_branch; body.repo.base ||= info.default_branch; body.repo.branch ||= info.default_branch;
+      }
+      if (env.SHARED && !body.memory?.length) { try { body.memory = (await env.SHARED.prepare("SELECT fact FROM memories ORDER BY created_at DESC LIMIT 40").all()).results.map((r) => r.fact); } catch {} }
       const stub = env.SESSIONS.get(env.SESSIONS.idFromName(id));
       const r = await stub.fetch("https://do/create", { method: "POST", body: JSON.stringify({ ...body, id, githubToken: who.token, login: who.login }) });
-      if (r.ok) await index.fetch("https://do/index/put", { method: "POST", body: JSON.stringify({ id, title: body.session?.title || "", repo: body.repo ? `${body.repo.owner}/${body.repo.name}` : "", branch: body.repo?.branch || "", created: Date.now() }) });
+      if (r.ok) await index.fetch("https://do/index/put", { method: "POST", body: JSON.stringify({ id, title: body.session?.title || body.title || "", source: body.source || "cli", repo: body.repo ? `${body.repo.owner}/${body.repo.name}` : "", branch: body.repo?.branch || "", created: Date.now() }) });
       return r;
     }
     const m = /^\/api\/sessions\/([\w-]+)(\/.*)?$/.exec(p); if (!m) return json({ error: "not found" }, 404);
@@ -137,7 +162,7 @@ export class AtomSession {
       const b = await req.json();
       await this.state.storage.deleteAll();
       const s = b.session || {};
-      await this.put("meta", { id: b.id, login: b.login, title: s.title || "", model: s.model || MODEL_DEFAULT, repo: b.repo || null, created: Date.now(), status: "idle", pushed: null, pr: null, cwd: s.cwd || "" });
+      await this.put("meta", { id: b.id, login: b.login, source: b.source || "cli", title: s.title || b.title || "", model: s.model || MODEL_DEFAULT, repo: b.repo || null, created: Date.now(), status: "idle", pushed: null, pr: null, cwd: s.cwd || "" });
       await this.put("token", b.githubToken);
       await this.put("messages", s.messages || []);
       await this.put("memory", b.memory || []);
@@ -170,8 +195,26 @@ export class AtomSession {
       this.state.waitUntil(this.turn(text).catch(async (e) => { await this.event("error", { message: String(e.message || e) }); }).finally(async () => { const m = await this.get("meta"); m.status = "idle"; await this.put("meta", m); await this.event("idle", {}); }));
       return json({ ok: true }, 202);
     }
+    if (p === "/diff") return json({ files: await this.diff() });
+    if (p === "/pr" && req.method === "POST") {
+      const b = await req.json().catch(() => ({}));
+      if (!meta.pushed) { const r = await this.commitPush(b.message || "Changes from Atom Cloud"); if (!/^Pushed/.test(r)) return json({ error: r }, 400); }
+      const r = await this.runTool("open_pull_request", { title: b.title || (await this.get("meta")).title || "Atom Cloud changes", body: b.body });
+      const m2 = await this.get("meta"); return m2.pr ? json({ url: m2.pr, result: r }) : json({ error: r }, 400);
+    }
     if (p === "/commit" && req.method === "POST") { const b = await req.json(); return json({ result: await this.commitPush(b.message || "Atom Cloud changes", b.branch) }); }
     return json({ error: "not found" }, 404);
+  }
+  async diff() {
+    const out = []; const tree = (await this.get("meta")).repo ? await this.baseTree() : { files: [] };
+    for (const [k, v] of await this.state.storage.list({ prefix: "f:" })) {
+      const path = k.slice(2); let before = "";
+      const f = tree.files.find((x) => x.path === path);
+      if (f) { try { await this.state.storage.delete("f:" + path); before = await this.readFile(path); } finally { await this.state.storage.put(k, v); } }
+      const after = v === null ? "" : v; if (before === after) continue;
+      out.push({ path, status: v === null ? "deleted" : f ? "modified" : "added", patch: unifiedDiff(path, before, after) });
+    }
+    return out;
   }
   async webSocketMessage(ws, msg) { /* clients only listen; messages are sent over HTTP */ }
 
@@ -260,7 +303,7 @@ export class AtomSession {
       "You are Atom, a coding agent now running in Atom Cloud on the user's Cloudflare account. You continue a session the user started on their computer.",
       meta.repo ? `Repository: ${meta.repo.owner}/${meta.repo.name}, branch ${meta.repo.branch || meta.repo.base}. Files the user had changed locally are already applied to your working copy.` : "No repository is attached.",
       "Tools work on the repository working copy. There is no shell here. When the work is done and the user wants it saved, call git_commit_push, and open_pull_request if asked. Keep replies short.",
-      memory.length ? "Long-term memory about the user:\n" + memory.map((m) => "- " + m).join("\n") : "",
+      memory.length ? "Long-term memory about the user (shared with the user's web assistant):\n" + memory.map((m) => "- " + m).join("\n") : "",
     ].filter(Boolean).join("\n\n");
     for (let step = 0; step < 30; step++) {
       const out = await env.AI.run(meta.model || MODEL_DEFAULT, { messages: [{ role: "system", content: sys }, ...messages], tools: TOOLS.map((t) => ({ type: "function", function: t })), max_tokens: 4096 });
@@ -282,6 +325,27 @@ export class AtomSession {
       await this.put("messages", messages);
     }
   }
+}
+
+// Minimal unified diff (LCS on lines; falls back to full replace for very large files).
+function unifiedDiff(path, a, b) {
+  const A = a ? a.split("\n") : [], B = b ? b.split("\n") : [];
+  let ops = [];
+  if (A.length * B.length > 4_000_000) ops = [...A.map((l) => ["-", l]), ...B.map((l) => ["+", l])];
+  else {
+    const n = A.length, m = B.length, L = Array.from({ length: n + 1 }, () => new Uint32Array(m + 1));
+    for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) L[i][j] = A[i] === B[j] ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
+    let i = 0, j = 0; while (i < n || j < m) { if (i < n && j < m && A[i] === B[j]) { ops.push([" ", A[i]]); i++; j++; } else if (i < n && (j >= m || L[i + 1][j] >= L[i][j + 1])) { ops.push(["-", A[i]]); i++; } else { ops.push(["+", B[j]]); j++; } }
+  }
+  const out = [`--- ${a ? "a/" + path : "/dev/null"}`, `+++ ${b ? "b/" + path : "/dev/null"}`]; const C = 3;
+  let k = 0; while (k < ops.length) {
+    if (ops[k][0] === " ") { k++; continue; }
+    let s = Math.max(0, k - C), e = k; while (e < ops.length) { let next = e; while (next < ops.length && ops[next][0] === " ") next++; if (next >= ops.length || next - e > C * 2) { e = Math.min(ops.length, e + C); break; } e = next + 1; while (e < ops.length && ops[e][0] !== " ") e++; }
+    let ai = 1, bi = 1; for (let x = 0; x < s; x++) { if (ops[x][0] !== "+") ai++; if (ops[x][0] !== "-") bi++; }
+    const hunk = ops.slice(s, e); const ac = hunk.filter((o) => o[0] !== "+").length, bc = hunk.filter((o) => o[0] !== "-").length;
+    out.push(`@@ -${ai},${ac} +${bi},${bc} @@`, ...hunk.map((o) => o[0] + o[1])); k = e;
+  }
+  return out.join("\n");
 }
 
 const UI = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Atom Cloud</title>

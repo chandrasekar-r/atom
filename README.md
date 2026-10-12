@@ -146,7 +146,10 @@ atom login github                                     # GitHub sign-in (device f
 atom cloud push --prompt "finish the refactor and open a PR"   # or /cloud inside a session
 atom cloud ls
 atom cloud attach ID                                  # stream + type to continue
-atom cloud pull ID                                    # session + branch back on your machine
+atom cloud pull ID                                    # session + branch back on your machine (or: atom pull ID)
+atom cloud new owner/repo --prompt "fix the flaky test"   # start in the cloud directly
+atom cloud diff ID && atom cloud pr ID                # review, then open a pull request
+atom cloud memory                                     # sync long-term memory with the shared store
 ```
 
 - `setup` needs a Cloudflare token that can edit Workers (`CLOUDFLARE_API_TOKEN`, `--token`, or an existing `wrangler login`).
